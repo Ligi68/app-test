@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Bataille Navale</title>
+<style>
+  :root {
+    --bg: #0d1b2a;
+    --panel: #13293d;
+    --panel-2: #1b3a54;
+    --sea: #16324f;
+    --sea-line: #234a6b;
+    --ship: #4a5568;
+    --ship-line: #2d3748;
+    --accent: #38bdf8;
+    --text: #e6f1ff;
+    --muted: #8ea9c1;
+    --miss: #5a7896;
+    --hit: #ff5a5f;
+    --sunk: #b91c1c;
+    --good: #34d399;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: radial-gradient(circle at 30% 10%, #1b3a54, var(--bg));
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 18px 12px 40px;
+    min-height: 100%;
+  }
+  header { text-align: center; margin-bottom: 14px; }
+  h1 {
+    font-size: clamp(1.6rem, 5vw, 2.4rem);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    background: linear-gradient(90deg, var(--accent), #7dd3fc);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .subtitle { color: var(--muted); font-size: .9rem; margin-top: 4px; }
+
+  #status {
+    background: var(--panel);
+    border: 1px solid var(--sea-line);
+    border-radius: 12px;
+    padding: 10px 18px;
+    margin: 6px 0 16px;
+    font-size: 1rem;
+    text-align: center;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    max-width: 560px;
+    transition: border-color .3s;
+  }
+  #status.turn-you { border-color: var(--accent); }
+  #status.turn-enemy { border-color: var(--hit); }
+  #status.win { border-color: var(--good); color: var(--good); font-weight: 700; }
+  #status.lose { border-color: var(--hit); color: var(--hit); font-weight: 700; }
+
+  .boards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 26px;
+    justify-content: center;
+    align-items: flex-start;
+  }
+  .board-wrap {
+    background: var(--panel);
+    border: 1px solid var(--sea-line);
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.35);
+  }
+  .board-title {
+    text-align: center;
+    font-size: .95rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .grid-outer { display: inline-grid; grid-template-columns: auto 1fr; grid-template-rows: auto 1fr; gap: 4px; }
+  .corner {}
+  .labels-x, .labels-y { display: grid; gap: 3px; color: var(--muted); font-size: .72rem; }
+  .labels-x { grid-template-columns: repeat(10, 1fr); text-align: center; }
+  .labels-y { grid-template-rows: repeat(10, 1fr); align-items: center; text-align: center; }
+  .labels-x span, .labels-y span { display: flex; align-items: center; justify-content: center; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 3px;
+    background: var(--sea-line);
+    padding: 3px;
+    border-radius: 8px;
+    touch-action: manipulation;
+  }
+  .cell {
+    width: clamp(24px, 7.4vw, 34px);
+    height: clamp(24px, 7.4vw, 34px);
+    background: var(--sea);
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: .8rem;
+    cursor: pointer;
+    position: relative;
+    transition: background .12s, transform .08s;
+    user-select: none;
+  }
+  .enemy .cell:hover:not(.fired) { background: #21496e; }
+  .cell.ship { background: linear-gradient(145deg, var(--ship), var(--ship-line)); }
+  .cell.miss { background: var(--sea); cursor: default; }
+  .cell.miss::after {
+    content: ""; width: 26%; height: 26%; border-radius: 50%;
+    background: var(--miss); box-shadow: 0 0 6px rgba(0,0,0,.4) inset;
+  }
+  .cell.hit { background: radial-gradient(circle, var(--hit), #b91c1c); cursor: default; animation: pop .25s ease; }
+  .cell.hit::after { content: "✸"; color: #fff; font-size: .9rem; }
+  .cell.sunk { background: radial-gradient(circle, var(--sunk), #7f1d1d); }
+  .cell.sunk::after { content: "✖"; color: #fff; }
+  .cell.preview-ok { background: rgba(56, 189, 248, .5); outline: 2px solid var(--accent); }
+  .cell.preview-bad { background: rgba(255, 90, 95, .5); outline: 2px solid var(--hit); }
+  @keyframes pop { 0% { transform: scale(.4); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 18px;
+  }
+  button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--sea-line);
+    padding: 10px 18px;
+    font-size: .92rem;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: transform .08s, background .15s, border-color .15s;
+  }
+  button:hover:not(:disabled) { background: #274b6b; border-color: var(--accent); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: linear-gradient(135deg, var(--accent), #0ea5e9); color: #04263b; border: none; }
+  button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+
+  .fleet { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; max-width: 260px; }
+  .fleet-item {
+    display: flex; align-items: center; gap: 8px;
+    font-size: .82rem; color: var(--muted);
+    padding: 4px 8px; border-radius: 6px; background: rgba(255,255,255,.03);
+  }
+  .fleet-item.active { color: var(--text); background: rgba(56,189,248,.14); outline: 1px solid var(--accent); }
+  .fleet-item.done { color: var(--good); text-decoration: line-through; opacity: .7; }
+  .fleet-item .pips { display: flex; gap: 2px; margin-left: auto; }
+  .pip { width: 9px; height: 9px; border-radius: 2px; background: var(--ship); }
+  .pip.gone { background: var(--hit); }
+
+  .placement-only, .battle-hidden { transition: opacity .2s; }
+  .hidden { display: none !important; }
+  footer { margin-top: 26px; color: var(--muted); font-size: .78rem; text-align: center; max-width: 420px; }
+  kbd { background: var(--panel-2); border: 1px solid var(--sea-line); border-radius: 4px; padding: 1px 6px; font-size: .75rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bataille Navale</h1>
+  <div class="subtitle">Coule toute la flotte ennemie avant qu'elle ne coule la tienne</div>
+</header>
+
+<div id="status" class="turn-you">Place tes navires pour commencer.</div>
+
+<div class="boards">
+  <div class="board-wrap">
+    <div class="board-title">Ta flotte</div>
+    <div class="grid-outer">
+      <div class="corner"></div>
+      <div class="labels-x" id="labelsX-p"></div>
+      <div class="labels-y" id="labelsY-p"></div>
+      <div class="grid player" id="playerGrid"></div>
+    </div>
+    <div class="fleet" id="fleetList"></div>
+  </div>
+
+  <div class="board-wrap" id="enemyWrap">
+    <div class="board-title">Eaux ennemies</div>
+    <div class="grid-outer">
+      <div class="corner"></div>
+      <div class="labels-x" id="labelsX-e"></div>
+      <div class="labels-y" id="labelsY-e"></div>
+      <div class="grid enemy" id="enemyGrid"></div>
+    </div>
+    <div class="fleet" id="enemyFleetList"></div>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="btnRotate" class="placement-only">Pivoter (R) — Horizontal</button>
+  <button id="btnRandom" class="placement-only">Placement aléatoire</button>
+  <button id="btnStart" class="primary placement-only" disabled>Démarrer la bataille</button>
+  <button id="btnReset" class="hidden">Nouvelle partie</button>
+</div>
+
+<footer>
+  Clique sur une case de <b>ta flotte</b> pour poser un navire ·
+  <kbd>R</kbd> ou le bouton pour l'orienter.
+  Pendant la bataille, clique dans les <b>eaux ennemies</b> pour tirer.
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  const SIZE = 10;
+  const SHIPS = [
+    { name: "Porte-avions", size: 5 },
+    { name: "Croiseur", size: 4 },
+    { name: "Contre-torpilleur", size: 3 },
+    { name: "Sous-marin", size: 3 },
+    { name: "Torpilleur", size: 2 },
+  ];
+  const LETTERS = "ABCDEFGHIJ".split("");
+
+  // ---- State ----
+  let phase = "placement"; // placement | battle | over
+  let orientation = "H";   // H | V
+  let placeIndex = 0;
+  let turn = "you";
+  let busy = false;
+
+  let playerBoard, enemyBoard;   // each cell: {shipId, hit}
+  let playerShips, enemyShips;   // {name,size,cells:[[r,c]],hits}
+
+  // AI targeting state
+  let aiQueue = [];       // candidate cells to try next (target mode)
+  let aiHits = [];        // current run of hits on a not-yet-sunk ship
+
+  // ---- DOM ----
+  const playerGrid = document.getElementById("playerGrid");
+  const enemyGrid  = document.getElementById("enemyGrid");
+  const statusEl   = document.getElementById("status");
+  const fleetList  = document.getElementById("fleetList");
+  const enemyFleetList = document.getElementById("enemyFleetList");
+  const btnRotate = document.getElementById("btnRotate");
+  const btnRandom = document.getElementById("btnRandom");
+  const btnStart  = document.getElementById("btnStart");
+  const btnReset  = document.getElementById("btnReset");
+  const enemyWrap = document.getElementById("enemyWrap");
+
+  // ---- Audio (tiny WebAudio blips, no external files) ----
+  let audioCtx = null;
+  function beep(freq, dur, type) {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = type || "sine";
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.18, audioCtx.currentTime + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + dur);
+    } catch (e) { /* audio not available */ }
+  }
+  const sndMiss = () => beep(220, 0.12, "triangle");
+  const sndHit  = () => beep(520, 0.15, "square");
+  const sndSunk = () => { beep(320, 0.18, "sawtooth"); setTimeout(() => beep(180, 0.28, "sawtooth"), 120); };
+
+  // ---- Board helpers ----
+  function emptyBoard() {
+    const b = [];
+    for (let r = 0; r < SIZE; r++) {
+      b.push([]);
+      for (let c = 0; c < SIZE; c++) b[r].push({ shipId: null, hit: false });
+    }
+    return b;
+  }
+
+  function shipCells(r, c, size, orient) {
+    const cells = [];
+    for (let i = 0; i < size; i++) {
+      cells.push(orient === "H" ? [r, c + i] : [r + i, c]);
+    }
+    return cells;
+  }
+
+  function canPlace(board, r, c, size, orient) {
+    const cells = shipCells(r, c, size, orient);
+    for (const [rr, cc] of cells) {
+      if (rr < 0 || cc < 0 || rr >= SIZE || cc >= SIZE) return false;
+      // no touching (including diagonals) for a cleaner game
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const nr = rr + dr, nc = cc + dc;
+          if (nr < 0 || nc < 0 || nr >= SIZE || nc >= SIZE) continue;
+          if (board[nr][nc].shipId !== null) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  function placeShip(board, ships, r, c, size, orient, name) {
+    const cells = shipCells(r, c, size, orient);
+    const id = ships.length;
+    for (const [rr, cc] of cells) board[rr][cc].shipId = id;
+    ships.push({ name, size, cells, hits: 0 });
+    return id;
+  }
+
+  function randomFleet(board, ships) {
+    for (const s of SHIPS) {
+      let placed = false, guard = 0;
+      while (!placed && guard++ < 1000) {
+        const orient = Math.random() < 0.5 ? "H" : "V";
+        const r = Math.floor(Math.random() * SIZE);
+        const c = Math.floor(Math.random() * SIZE);
+        if (canPlace(board, r, c, s.size, orient)) {
+          placeShip(board, ships, r, c, s.size, orient, s.name);
+          placed = true;
+        }
+      }
+    }
+  }
+
+  // ---- Rendering ----
+  function buildGrid(gridEl, isEnemy) {
+    gridEl.innerHTML = "";
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        cell.dataset.r = r;
+        cell.dataset.c = c;
+        gridEl.appendChild(cell);
+      }
+    }
+  }
+
+  function buildLabels() {
+    ["labelsX-p", "labelsX-e"].forEach(id => {
+      const el = document.getElementById(id);
+      el.innerHTML = "";
+      for (let c = 0; c < SIZE; c++) { const s = document.createElement("span"); s.textContent = c + 1; el.appendChild(s); }
+    });
+    ["labelsY-p", "labelsY-e"].forEach(id => {
+      const el = document.getElementById(id);
+      el.innerHTML = "";
+      for (let r = 0; r < SIZE; r++) { const s = document.createElement("span"); s.textContent = LETTERS[r]; el.appendChild(s); }
+    });
+  }
+
+  function cellAt(gridEl, r, c) {
+    return gridEl.children[r * SIZE + c];
+  }
+
+  function renderPlayer() {
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        const cell = cellAt(playerGrid, r, c);
+        const data = playerBoard[r][c];
+        cell.className = "cell";
+        if (data.shipId !== null) cell.classList.add("ship");
+        if (data.hit) {
+          if (data.shipId !== null) {
+            cell.classList.add(playerShips[data.shipId].hits >= playerShips[data.shipId].size ? "sunk" : "hit");
+          } else {
+            cell.classList.add("miss");
+          }
+        }
+      }
+    }
+  }
+
+  function renderEnemy() {
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        const cell = cellAt(enemyGrid, r, c);
+        const data = enemyBoard[r][c];
+        cell.className = "cell";
+        if (data.hit) {
+          cell.classList.add("fired");
+          if (data.shipId !== null) {
+            cell.classList.add(enemyShips[data.shipId].hits >= enemyShips[data.shipId].size ? "sunk" : "hit");
+          } else {
+            cell.classList.add("miss");
+          }
+        }
+      }
+    }
+  }
+
+  function renderFleet() {
+    fleetList.innerHTML = "";
+    SHIPS.forEach((s, i) => {
+      const item = document.createElement("div");
+      item.className = "fleet-item";
+      if (phase === "placement") {
+        if (i < placeIndex) item.classList.add("done");
+        else if (i === placeIndex) item.classList.add("active");
+      } else {
+        const ship = playerShips[i];
+        if (ship && ship.hits >= ship.size) item.classList.add("done");
+      }
+      const label = document.createElement("span");
+      label.textContent = s.name + " (" + s.size + ")";
+      const pips = document.createElement("div");
+      pips.className = "pips";
+      for (let p = 0; p < s.size; p++) {
+        const pip = document.createElement("div");
+        pip.className = "pip";
+        if (phase !== "placement" && playerShips[i] && p < playerShips[i].hits) pip.classList.add("gone");
+        pips.appendChild(pip);
+      }
+      item.appendChild(label);
+      item.appendChild(pips);
+      fleetList.appendChild(item);
+    });
+  }
+
+  function renderEnemyFleet() {
+    enemyFleetList.innerHTML = "";
+    SHIPS.forEach((s, i) => {
+      const item = document.createElement("div");
+      item.className = "fleet-item";
+      const ship = enemyShips && enemyShips[i];
+      const sunk = ship && ship.hits >= ship.size;
+      if (sunk) item.classList.add("done");
+      const label = document.createElement("span");
+      label.textContent = sunk ? (s.name + " (" + s.size + ")") : ("Navire inconnu (" + s.size + ")");
+      const pips = document.createElement("div");
+      pips.className = "pips";
+      for (let p = 0; p < s.size; p++) {
+        const pip = document.createElement("div");
+        pip.className = "pip";
+        if (ship && p < ship.hits) pip.classList.add("gone");
+        pips.appendChild(pip);
+      }
+      item.appendChild(label);
+      item.appendChild(pips);
+      enemyFleetList.appendChild(item);
+    });
+  }
+
+  function setStatus(text, cls) {
+    statusEl.textContent = text;
+    statusEl.className = cls || "";
+  }
+
+  // ---- Placement interaction ----
+  function clearPreview() {
+    for (const cell of playerGrid.children) {
+      cell.classList.remove("preview-ok", "preview-bad");
+    }
+  }
+
+  function previewAt(r, c) {
+    if (phase !== "placement" || placeIndex >= SHIPS.length) return;
+    clearPreview();
+    const size = SHIPS[placeIndex].size;
+    const ok = canPlace(playerBoard, r, c, size, orientation);
+    const cells = shipCells(r, c, size, orientation);
+    for (const [rr, cc] of cells) {
+      if (rr < 0 || cc < 0 || rr >= SIZE || cc >= SIZE) continue;
+      cellAt(playerGrid, rr, cc).classList.add(ok ? "preview-ok" : "preview-bad");
+    }
+  }
+
+  function tryPlaceAt(r, c) {
+    if (phase !== "placement" || placeIndex >= SHIPS.length) return;
+    const s = SHIPS[placeIndex];
+    if (!canPlace(playerBoard, r, c, s.size, orientation)) {
+      setStatus("Placement impossible ici — les navires ne peuvent pas se toucher.", "turn-you");
+      return;
+    }
+    placeShip(playerBoard, playerShips, r, c, s.size, orientation, s.name);
+    placeIndex++;
+    clearPreview();
+    renderPlayer();
+    renderFleet();
+    beep(440, 0.08, "sine");
+    if (placeIndex >= SHIPS.length) {
+      setStatus("Flotte prête ! Clique sur « Démarrer la bataille ».", "turn-you");
+      btnStart.disabled = false;
+    } else {
+      setStatus("Place ton " + SHIPS[placeIndex].name + " (" + SHIPS[placeIndex].size + " cases).", "turn-you");
+    }
+  }
+
+  // ---- Battle interaction ----
+  function playerFire(r, c) {
+    if (phase !== "battle" || turn !== "you" || busy) return;
+    const data = enemyBoard[r][c];
+    if (data.hit) return;
+    data.hit = true;
+    let sunkShip = null;
+    if (data.shipId !== null) {
+      const ship = enemyShips[data.shipId];
+      ship.hits++;
+      if (ship.hits >= ship.size) sunkShip = ship;
+    }
+    renderEnemy();
+    renderEnemyFleet();
+
+    if (data.shipId !== null) {
+      if (sunkShip) {
+        sndSunk();
+        setStatus("💥 Touché-coulé ! Tu as coulé le " + sunkShip.name + " ennemi.", "turn-you");
+      } else {
+        sndHit();
+        setStatus("💥 Touché ! Rejoue.", "turn-you");
+      }
+      if (checkWin("you")) return;
+      // player keeps the turn on a hit
+    } else {
+      sndMiss();
+      setStatus("Plouf… à l'eau. Au tour de l'ennemi.", "turn-enemy");
+      turn = "enemy";
+      busy = true;
+      setTimeout(enemyTurn, 750);
+    }
+  }
+
+  // ---- AI ----
+  function neighbors(r, c) {
+    return [[r-1,c],[r+1,c],[r,c-1],[r,c+1]].filter(
+      ([rr, cc]) => rr >= 0 && cc >= 0 && rr < SIZE && cc < SIZE
+    );
+  }
+
+  function aiChooseTarget() {
+    // Target mode: use queue built from previous hits
+    while (aiQueue.length) {
+      const [r, c] = aiQueue.shift();
+      if (!playerBoard[r][c].hit) return [r, c];
+    }
+    // Hunt mode with parity (checkerboard) to be efficient
+    const candidates = [];
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        if (!playerBoard[r][c].hit && (r + c) % 2 === 0) candidates.push([r, c]);
+      }
+    }
+    const pool = candidates.length ? candidates : allUnfired();
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  function allUnfired() {
+    const list = [];
+    for (let r = 0; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++)
+        if (!playerBoard[r][c].hit) list.push([r, c]);
+    return list;
+  }
+
+  function enemyTurn() {
+    if (phase !== "battle") { busy = false; return; }
+    const [r, c] = aiChooseTarget();
+    const data = playerBoard[r][c];
+    data.hit = true;
+
+    if (data.shipId !== null) {
+      const ship = playerShips[data.shipId];
+      ship.hits++;
+      aiHits.push([r, c]);
+
+      if (ship.hits >= ship.size) {
+        // Ship sunk: clear targeting memory for a fresh hunt
+        sndSunk();
+        aiHits = [];
+        aiQueue = [];
+        renderPlayer(); renderFleet();
+        setStatus("🔥 L'ennemi a coulé ton " + ship.name + " !", "turn-enemy");
+        if (checkWin("enemy")) return;
+        setTimeout(enemyTurn, 750); // hit → enemy plays again
+        return;
+      }
+
+      // Still afloat: refine the target queue
+      updateAiQueue();
+      sndHit();
+      renderPlayer(); renderFleet();
+      setStatus("🔥 L'ennemi t'a touché !", "turn-enemy");
+      if (checkWin("enemy")) return;
+      setTimeout(enemyTurn, 750);
+    } else {
+      sndMiss();
+      renderPlayer();
+      setStatus("L'ennemi tire… à l'eau. À toi de jouer.", "turn-you");
+      turn = "you";
+      busy = false;
+    }
+  }
+
+  function updateAiQueue() {
+    aiQueue = [];
+    if (aiHits.length >= 2) {
+      // Determine line direction and extend both ends
+      const rows = aiHits.map(h => h[0]);
+      const cols = aiHits.map(h => h[1]);
+      const sameRow = rows.every(x => x === rows[0]);
+      const sameCol = cols.every(x => x === cols[0]);
+      if (sameRow) {
+        const r = rows[0];
+        const minC = Math.min(...cols), maxC = Math.max(...cols);
+        pushIfValid(r, minC - 1);
+        pushIfValid(r, maxC + 1);
+      } else if (sameCol) {
+        const c = cols[0];
+        const minR = Math.min(...rows), maxR = Math.max(...rows);
+        pushIfValid(minR - 1, c);
+        pushIfValid(maxR + 1, c);
+      }
+    }
+    if (aiQueue.length === 0) {
+      // Only one hit so far (or line broke): probe around every open hit
+      for (const [hr, hc] of aiHits) {
+        for (const [nr, nc] of neighbors(hr, hc)) pushIfValid(nr, nc);
+      }
+    }
+  }
+
+  function pushIfValid(r, c) {
+    if (r < 0 || c < 0 || r >= SIZE || c >= SIZE) return;
+    if (playerBoard[r][c].hit) return;
+    if (aiQueue.some(([qr, qc]) => qr === r && qc === c)) return;
+    aiQueue.push([r, c]);
+  }
+
+  // ---- Win check ----
+  function allSunk(ships) { return ships.every(s => s.hits >= s.size); }
+
+  function checkWin(who) {
+    if (who === "you" && allSunk(enemyShips)) {
+      phase = "over";
+      busy = false;
+      revealEnemy();
+      setStatus("🏆 Victoire ! Tu as envoyé toute la flotte ennemie par le fond.", "win");
+      finishGame();
+      return true;
+    }
+    if (who === "enemy" && allSunk(playerShips)) {
+      phase = "over";
+      busy = false;
+      setStatus("☠️ Défaite… ta flotte a été anéantie. Retente ta chance !", "lose");
+      finishGame();
+      return true;
+    }
+    return false;
+  }
+
+  function revealEnemy() {
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        const data = enemyBoard[r][c];
+        const cell = cellAt(enemyGrid, r, c);
+        if (data.shipId !== null && !data.hit) cell.classList.add("ship");
+      }
+    }
+  }
+
+  function finishGame() {
+    btnReset.classList.remove("hidden");
+    document.querySelectorAll(".placement-only").forEach(b => b.classList.add("hidden"));
+  }
+
+  // ---- Setup / flow ----
+  function startBattle() {
+    if (placeIndex < SHIPS.length) return;
+    enemyBoard = emptyBoard();
+    enemyShips = [];
+    randomFleet(enemyBoard, enemyShips);
+    phase = "battle";
+    turn = "you";
+    aiQueue = []; aiHits = [];
+    renderEnemy();
+    renderEnemyFleet();
+    enemyWrap.style.opacity = 1;
+    document.querySelectorAll(".placement-only").forEach(b => b.classList.add("hidden"));
+    setStatus("La bataille commence ! Clique dans les eaux ennemies pour tirer.", "turn-you");
+  }
+
+  function resetGame() {
+    phase = "placement";
+    orientation = "H";
+    placeIndex = 0;
+    turn = "you";
+    busy = false;
+    aiQueue = []; aiHits = [];
+    playerBoard = emptyBoard();
+    playerShips = [];
+    enemyBoard = emptyBoard();
+    enemyShips = [];
+    buildGrid(playerGrid, false);
+    buildGrid(enemyGrid, true);
+    renderPlayer();
+    renderEnemy();
+    renderFleet();
+    renderEnemyFleet();
+    btnRotate.textContent = "Pivoter (R) — Horizontal";
+    btnRotate.classList.remove("hidden");
+    btnRandom.classList.remove("hidden");
+    btnStart.classList.remove("hidden");
+    btnStart.disabled = true;
+    btnReset.classList.add("hidden");
+    setStatus("Place ton " + SHIPS[0].name + " (" + SHIPS[0].size + " cases). Utilise « Pivoter » pour l'orienter.", "turn-you");
+  }
+
+  function toggleOrientation() {
+    orientation = orientation === "H" ? "V" : "H";
+    btnRotate.textContent = "Pivoter (R) — " + (orientation === "H" ? "Horizontal" : "Vertical");
+  }
+
+  function randomizeMine() {
+    playerBoard = emptyBoard();
+    playerShips = [];
+    randomFleet(playerBoard, playerShips);
+    placeIndex = SHIPS.length;
+    renderPlayer();
+    renderFleet();
+    btnStart.disabled = false;
+    setStatus("Flotte placée aléatoirement ! Clique sur « Démarrer la bataille ».", "turn-you");
+  }
+
+  // ---- Events ----
+  playerGrid.addEventListener("click", (e) => {
+    const cell = e.target.closest(".cell");
+    if (!cell) return;
+    tryPlaceAt(+cell.dataset.r, +cell.dataset.c);
+  });
+  playerGrid.addEventListener("mousemove", (e) => {
+    const cell = e.target.closest(".cell");
+    if (!cell) return;
+    previewAt(+cell.dataset.r, +cell.dataset.c);
+  });
+  playerGrid.addEventListener("mouseleave", clearPreview);
+
+  enemyGrid.addEventListener("click", (e) => {
+    const cell = e.target.closest(".cell");
+    if (!cell) return;
+    playerFire(+cell.dataset.r, +cell.dataset.c);
+  });
+
+  btnRotate.addEventListener("click", toggleOrientation);
+  btnRandom.addEventListener("click", randomizeMine);
+  btnStart.addEventListener("click", startBattle);
+  btnReset.addEventListener("click", resetGame);
+
+  document.addEventListener("keydown", (e) => {
+    if ((e.key === "r" || e.key === "R") && phase === "placement") toggleOrientation();
+  });
+
+  // ---- Init ----
+  buildLabels();
+  resetGame();
+})();
+</script>
+</body>
+</html>
