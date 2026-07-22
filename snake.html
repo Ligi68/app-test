@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Snake</title>
+<style>
+  :root {
+    --bg: #0d1b2a;
+    --panel: #13293d;
+    --panel-2: #1b3a54;
+    --board: #0f2438;
+    --grid-line: #17324c;
+    --accent: #38bdf8;
+    --text: #e6f1ff;
+    --muted: #8ea9c1;
+    --snake: #34d399;
+    --snake-head: #6ee7b7;
+    --food: #fb7185;
+    --gold: #fbbf24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: radial-gradient(circle at 30% 10%, #1b3a54, var(--bg));
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 14px 12px 32px; min-height: 100%;
+  }
+  a.home-link {
+    position: fixed; top: 10px; left: 12px; z-index: 5;
+    color: var(--muted); text-decoration: none; font-size: .85rem; font-weight: 600;
+  }
+  header { text-align: center; margin-bottom: 10px; }
+  h1 {
+    font-size: clamp(1.6rem, 5vw, 2.4rem); letter-spacing: 2px; text-transform: uppercase;
+    background: linear-gradient(90deg, var(--snake), #6ee7b7);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .subtitle { color: var(--muted); font-size: .9rem; margin-top: 4px; }
+
+  .scorebar { display: flex; gap: 10px; justify-content: center; margin: 6px 0 12px; }
+  .stat {
+    background: var(--panel); border: 1px solid var(--grid-line);
+    border-radius: 10px; padding: 6px 16px; text-align: center; min-width: 84px;
+  }
+  .stat .num { font-size: 1.2rem; font-weight: 700; color: var(--snake); }
+  .stat .num.best { color: var(--gold); }
+  .stat .lbl { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+
+  .board-wrap {
+    position: relative;
+    background: var(--panel); border: 1px solid var(--grid-line);
+    border-radius: 16px; padding: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.35);
+    line-height: 0;
+  }
+  canvas { background: var(--board); border-radius: 8px; display: block; touch-action: none; }
+
+  .overlay {
+    position: absolute; inset: 12px; border-radius: 8px;
+    background: rgba(6, 15, 26, .88);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; text-align: center; padding: 20px; line-height: 1.4;
+  }
+  .overlay.hidden { display: none; }
+  .overlay .big { font-size: 2.6rem; }
+  .overlay .msg { font-size: 1.15rem; font-weight: 600; }
+  .overlay .sub { color: var(--muted); font-size: .85rem; max-width: 260px; }
+
+  button {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--grid-line); padding: 11px 20px;
+    font-size: .92rem; border-radius: 10px; cursor: pointer; font-weight: 600;
+    transition: transform .08s, background .15s, border-color .15s;
+  }
+  button:hover:not(:disabled) { background: #274b6b; border-color: var(--snake); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button.primary { background: linear-gradient(135deg, var(--snake), #10b981); color: #04261a; border: none; }
+  button.primary:hover { filter: brightness(1.08); }
+
+  .controls { display: flex; gap: 10px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
+
+  /* On-screen D-pad (mobile) */
+  .dpad {
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: repeat(3, 58px);
+    grid-template-rows: repeat(3, 58px);
+    gap: 8px; justify-content: center;
+  }
+  .dpad button {
+    width: 58px; height: 58px; padding: 0; font-size: 1.4rem;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .dpad .up { grid-column: 2; grid-row: 1; }
+  .dpad .left { grid-column: 1; grid-row: 2; }
+  .dpad .right { grid-column: 3; grid-row: 2; }
+  .dpad .down { grid-column: 2; grid-row: 3; }
+
+  footer { margin-top: 22px; color: var(--muted); font-size: .78rem; text-align: center; max-width: 420px; }
+  kbd { background: var(--panel-2); border: 1px solid var(--grid-line); border-radius: 4px; padding: 1px 6px; font-size: .75rem; }
+</style>
+</head>
+<body>
+<a href="index.html" class="home-link">← Accueil</a>
+
+<header>
+  <h1>Snake</h1>
+  <div class="subtitle">Mange les pommes, grandis… et ne te mords pas la queue !</div>
+</header>
+
+<div class="scorebar">
+  <div class="stat"><div class="num" id="score">0</div><div class="lbl">Score</div></div>
+  <div class="stat"><div class="num best" id="best">0</div><div class="lbl">Record</div></div>
+</div>
+
+<div class="board-wrap">
+  <canvas id="canvas" width="420" height="420"></canvas>
+  <div class="overlay" id="overlay">
+    <div class="big" id="ovIcon">🐍</div>
+    <div class="msg" id="ovMsg">Prêt à jouer ?</div>
+    <div class="sub" id="ovSub">Flèches, ZQSD/WASD ou le pavé tactile pour diriger le serpent.</div>
+    <button class="primary" id="btnStart">Commencer</button>
+  </div>
+</div>
+
+<div class="controls">
+  <button id="btnPause" disabled>Pause</button>
+  <button id="btnRestart">Recommencer</button>
+</div>
+
+<div class="dpad">
+  <button class="up" data-dir="up" aria-label="Haut">▲</button>
+  <button class="left" data-dir="left" aria-label="Gauche">◀</button>
+  <button class="right" data-dir="right" aria-label="Droite">▶</button>
+  <button class="down" data-dir="down" aria-label="Bas">▼</button>
+</div>
+
+<footer>
+  <kbd>Espace</kbd> ou <kbd>P</kbd> pour mettre en pause · La vitesse augmente à mesure que tu grandis.
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  const COLS = 20, ROWS = 20;
+  const BEST_KEY = "snake.best.v1";
+  const BASE_SPEED = 140;   // ms per step at start
+  const MIN_SPEED = 65;     // fastest
+  const SPEED_STEP = 4;     // ms shaved per food eaten
+
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const scoreEl = document.getElementById("score");
+  const bestEl = document.getElementById("best");
+  const overlay = document.getElementById("overlay");
+  const ovIcon = document.getElementById("ovIcon");
+  const ovMsg = document.getElementById("ovMsg");
+  const ovSub = document.getElementById("ovSub");
+  const btnStart = document.getElementById("btnStart");
+  const btnPause = document.getElementById("btnPause");
+  const btnRestart = document.getElementById("btnRestart");
+
+  let cell = 21;            // pixel size of one cell (computed responsively)
+  let snake, dir, nextDir, food, score, speed;
+  let running = false, paused = false, over = false;
+  let timer = null;
+
+  let best = 0;
+  try { best = parseInt(localStorage.getItem(BEST_KEY), 10) || 0; } catch (e) { best = 0; }
+  bestEl.textContent = best;
+
+  // ---- Responsive sizing ----
+  function resize() {
+    const target = Math.min(window.innerWidth - 48, 440);
+    cell = Math.max(12, Math.floor(target / COLS));
+    const px = cell * COLS;
+    canvas.width = px;
+    canvas.height = px;
+    draw();
+  }
+
+  // ---- Audio (tiny WebAudio blips) ----
+  let actx = null;
+  function beep(freq, dur, type) {
+    try {
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, actx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.16, actx.currentTime + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
+      o.connect(g); g.connect(actx.destination);
+      o.start(); o.stop(actx.currentTime + dur);
+    } catch (e) {}
+  }
+  const sndEat = () => beep(560, 0.08, "square");
+  const sndOver = () => { beep(300, 0.14, "sawtooth"); setTimeout(() => beep(150, 0.26, "sawtooth"), 110); };
+
+  // ---- Game setup ----
+  function reset() {
+    snake = [ {x: 8, y: 10}, {x: 7, y: 10}, {x: 6, y: 10} ];
+    dir = {x: 1, y: 0};
+    nextDir = {x: 1, y: 0};
+    score = 0;
+    speed = BASE_SPEED;
+    over = false;
+    paused = false;
+    placeFood();
+    scoreEl.textContent = "0";
+    draw();
+  }
+
+  function placeFood() {
+    let ok = false;
+    while (!ok) {
+      food = { x: (Math.random() * COLS) | 0, y: (Math.random() * ROWS) | 0 };
+      ok = !snake.some(s => s.x === food.x && s.y === food.y);
+    }
+  }
+
+  // ---- Loop ----
+  function loop() {
+    if (!running || paused) return;
+    step();
+    if (running) timer = setTimeout(loop, speed);
+  }
+
+  function step() {
+    dir = nextDir;
+    const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+    // wall collision
+    if (head.x < 0 || head.y < 0 || head.x >= COLS || head.y >= ROWS) return gameOver();
+    // self collision
+    if (snake.some(s => s.x === head.x && s.y === head.y)) return gameOver();
+
+    snake.unshift(head);
+
+    if (head.x === food.x && head.y === food.y) {
+      score++;
+      scoreEl.textContent = score;
+      speed = Math.max(MIN_SPEED, BASE_SPEED - score * SPEED_STEP);
+      sndEat();
+      placeFood();
+    } else {
+      snake.pop();
+    }
+    draw();
+  }
+
+  function gameOver() {
+    running = false;
+    over = true;
+    clearTimeout(timer);
+    sndOver();
+    if (score > best) {
+      best = score;
+      bestEl.textContent = best;
+      try { localStorage.setItem(BEST_KEY, String(best)); } catch (e) {}
+    }
+    btnPause.disabled = true;
+    ovIcon.textContent = "💥";
+    ovMsg.textContent = "Perdu ! Score : " + score;
+    ovSub.textContent = (score >= best && score > 0) ? "🏆 Nouveau record !" : "Record : " + best;
+    btnStart.textContent = "Rejouer";
+    overlay.classList.remove("hidden");
+    draw();
+  }
+
+  // ---- Rendering ----
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function draw() {
+    const px = cell * COLS;
+    ctx.clearRect(0, 0, px, px);
+
+    // subtle grid
+    ctx.strokeStyle = "rgba(23,50,76,.6)";
+    ctx.lineWidth = 1;
+    for (let i = 1; i < COLS; i++) {
+      ctx.beginPath(); ctx.moveTo(i * cell + .5, 0); ctx.lineTo(i * cell + .5, px); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, i * cell + .5); ctx.lineTo(px, i * cell + .5); ctx.stroke();
+    }
+
+    if (!snake) return;
+
+    // food
+    const fpad = Math.max(2, cell * 0.14);
+    ctx.fillStyle = getCss("--food");
+    roundRect(food.x * cell + fpad, food.y * cell + fpad, cell - fpad * 2, cell - fpad * 2, (cell - fpad * 2) / 2);
+    ctx.fill();
+
+    // snake
+    const pad = Math.max(1, cell * 0.08);
+    for (let i = snake.length - 1; i >= 0; i--) {
+      const s = snake[i];
+      ctx.fillStyle = i === 0 ? getCss("--snake-head") : getCss("--snake");
+      roundRect(s.x * cell + pad, s.y * cell + pad, cell - pad * 2, cell - pad * 2, Math.max(3, cell * 0.28));
+      ctx.fill();
+    }
+
+    // eyes on head
+    const h = snake[0];
+    ctx.fillStyle = "#04261a";
+    const eye = Math.max(1.5, cell * 0.09);
+    const cx = h.x * cell, cy = h.y * cell;
+    const ex = dir.x, ey = dir.y;
+    // two eyes offset perpendicular to direction
+    const off = cell * 0.28, fwd = cell * 0.62, half = cell / 2;
+    const perpx = ey, perpy = ex;
+    const e1x = cx + half + ex * (fwd - half) + perpx * off;
+    const e1y = cy + half + ey * (fwd - half) + perpy * off;
+    const e2x = cx + half + ex * (fwd - half) - perpx * off;
+    const e2y = cy + half + ey * (fwd - half) - perpy * off;
+    ctx.beginPath(); ctx.arc(e1x, e1y, eye, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(e2x, e2y, eye, 0, 7); ctx.fill();
+  }
+
+  function getCss(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+  // ---- Controls ----
+  function setDir(nx, ny) {
+    // prevent 180° reversal
+    if (nx === -dir.x && ny === -dir.y) return;
+    // also block if it reverses the currently queued direction on the same tick
+    if (nx === -nextDir.x && ny === -nextDir.y) return;
+    nextDir = { x: nx, y: ny };
+  }
+  const DIRS = {
+    up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0],
+  };
+  function dirByName(name) { const d = DIRS[name]; if (d) setDir(d[0], d[1]); }
+
+  function start() {
+    reset();
+    running = true;
+    paused = false;
+    over = false;
+    btnPause.disabled = false;
+    btnPause.textContent = "Pause";
+    overlay.classList.add("hidden");
+    clearTimeout(timer);
+    timer = setTimeout(loop, speed);
+  }
+
+  function togglePause() {
+    if (!running && !paused) return;
+    if (over) return;
+    paused = !paused;
+    if (paused) {
+      running = false;
+      clearTimeout(timer);
+      btnPause.textContent = "Reprendre";
+      ovIcon.textContent = "⏸️";
+      ovMsg.textContent = "Pause";
+      ovSub.textContent = "Score : " + score;
+      btnStart.textContent = "Reprendre";
+      overlay.classList.remove("hidden");
+    } else {
+      running = true;
+      btnPause.textContent = "Pause";
+      overlay.classList.add("hidden");
+      timer = setTimeout(loop, speed);
+    }
+  }
+
+  // Start button doubles as resume when paused
+  btnStart.addEventListener("click", () => {
+    if (paused && !over) { togglePause(); }
+    else { start(); }
+  });
+  btnPause.addEventListener("click", togglePause);
+  btnRestart.addEventListener("click", start);
+
+  document.addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    if (k === "arrowup" || k === "w" || k === "z") { dirByName("up"); e.preventDefault(); }
+    else if (k === "arrowdown" || k === "s") { dirByName("down"); e.preventDefault(); }
+    else if (k === "arrowleft" || k === "a" || k === "q") { dirByName("left"); e.preventDefault(); }
+    else if (k === "arrowright" || k === "d") { dirByName("right"); e.preventDefault(); }
+    else if (k === " " || k === "p") { togglePause(); e.preventDefault(); }
+    else if ((k === "enter") && (over || (!running && !paused))) { start(); }
+  });
+
+  // D-pad
+  document.querySelectorAll(".dpad button").forEach(b => {
+    b.addEventListener("click", () => dirByName(b.dataset.dir));
+  });
+
+  // Swipe on canvas
+  let touchStart = null;
+  canvas.addEventListener("touchstart", (e) => {
+    const t = e.touches[0];
+    touchStart = { x: t.clientX, y: t.clientY };
+  }, { passive: true });
+  canvas.addEventListener("touchmove", (e) => { e.preventDefault(); }, { passive: false });
+  canvas.addEventListener("touchend", (e) => {
+    if (!touchStart) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStart.x, dy = t.clientY - touchStart.y;
+    if (Math.abs(dx) < 18 && Math.abs(dy) < 18) { touchStart = null; return; }
+    if (Math.abs(dx) > Math.abs(dy)) dirByName(dx > 0 ? "right" : "left");
+    else dirByName(dy > 0 ? "down" : "up");
+    touchStart = null;
+  }, { passive: true });
+
+  window.addEventListener("resize", resize);
+
+  // ---- Init ----
+  resize();
+})();
+</script>
+</body>
+</html>
