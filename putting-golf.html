@@ -53,7 +53,7 @@
 
   #hint {
     position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%); z-index: 8;
-    color: var(--muted); font-size: .8rem; text-align: center; width: 92%; max-width: 460px;
+    color: var(--muted); font-size: .8rem; text-align: center; width: 92%; max-width: 480px;
     pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,.6);
   }
 
@@ -98,7 +98,7 @@
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
   .overlay .msg { font-size: 1.2rem; font-weight: 600; }
-  .overlay .sub { color: var(--muted); font-size: .9rem; max-width: 340px; line-height: 1.5; }
+  .overlay .sub { color: var(--muted); font-size: .9rem; max-width: 360px; line-height: 1.5; }
   button {
     background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
     padding: 12px 24px; font-size: .95rem; border-radius: 10px; cursor: pointer; font-weight: 600;
@@ -131,7 +131,7 @@
   <div class="stat"><div class="num best" id="sBest">—</div><div class="lbl">Record trou</div></div>
 </div>
 
-<div id="hint">Glisse pour viser · Maintiens pour charger la force · Relâche pour putter</div>
+<div id="hint">Glisse pour viser · Maintiens pour charger · Relâche pour putter · Gare aux pentes, bunkers et rochers !</div>
 
 <div id="power">
   <div class="label"><span>Force</span><span id="powerPct">0%</span></div>
@@ -150,7 +150,7 @@
   <div class="sub">
     Vise avec la souris ou le doigt, <b>maintiens</b> pour charger la jauge de force
     (attention au timing, elle oscille au max !), puis <b>relâche</b> pour putter.
-    Rentre la balle dans le trou en un minimum de coups.
+    Le green a du <b>relief</b> : lis les pentes, évite les <b>bunkers</b> (sable) et les <b>rochers</b>.
   </div>
   <button class="primary" id="btnStart">Commencer</button>
   <button id="btnLbStart">🏆 Classement</button>
@@ -172,15 +172,18 @@
     return;
   }
   const THREE = window.THREE;
+  const rand = (a, b) => a + Math.random() * (b - a);
 
   // ---------- Constantes de jeu ----------
   const GREEN_W = 16;      // largeur du green (axe x)
   const GREEN_D = 22;      // profondeur du green (axe z)
-  const BALL_R = 0.34;
-  const HOLE_R = 0.5;
+  const BALL_R = 0.22;     // balle plus petite (proportion réaliste)
+  const HOLE_R = 0.45;
   const WALL = 0.35;       // marge de rebond depuis le bord
 
-  const MU = 1.7;          // décélération par friction (u/s^2)
+  const MU = 1.7;          // décélération par friction sur le green (u/s^2)
+  const MU_SAND = 5.6;     // friction dans le sable (bunker)
+  const SLOPE_G = 6.0;     // « gravité » des pentes (force = -SLOPE_G · gradient)
   const MAX_SPEED = 10.5;  // vitesse initiale à pleine puissance
   const REST = 0.7;        // amortissement des rebonds
   const SINK_SPEED = 3.2;  // vitesse max pour tomber dans le trou
@@ -192,27 +195,52 @@
 
   const CAM_BACK = 7.5, CAM_HEIGHT = 4.2, CAM_LOOK_AHEAD = 5;
   const BEST_KEY = "golf.bestHole.v1";
-  const RUN_HOLES = 9;      // un parcours = 9 trous ; le total de coups alimente le classement
+  const RUN_HOLES = 9;
 
   const minX = -GREEN_W / 2 + WALL, maxX = GREEN_W / 2 - WALL;
   const minZ = -GREEN_D / 2 + WALL, maxZ = GREEN_D / 2 - WALL;
 
   // ---------- État ----------
-  // phase: 'idle' (avant départ) | 'ready' (balle à l'arrêt, on peut viser/tirer)
-  //        'rolling' (balle en mouvement) | 'sunk' (dans le trou)
-  let phase = "idle";
+  let phase = "idle"; // idle | ready | rolling | sunk
   const ball = { x: 0, z: 6, vx: 0, vz: 0 };
   const hole = { x: 0, z: -6 };
-  let aim = 0;                 // angle de visée (rad) dans le plan xz
+  let aim = 0;
   let strokesHole = 0, strokesTotal = 0, holeNum = 1, runAce = false;
   let charging = false, chargeT = 0, power = 0;
+  let ballDisplayY = BALL_R;
   let best = null;
   try { const b = parseInt(localStorage.getItem(BEST_KEY), 10); if (b > 0) best = b; } catch (e) {}
 
-  // ---------- Extensibilité (pentes / obstacles v2) ----------
-  // Renvoie l'accélération due au terrain à une position (x,z). v1 : plat.
-  function terrainForceAt(x, z) { return { x: 0, z: 0 }; }
-  const obstacles = []; // future extension : { collide(ball) {...} }
+  // ---------- Relief (heightfield) + obstacles ----------
+  const features = { tilt: { x: 0, z: 0 }, mounds: [] };
+  const bunkers = [];  // { cx, cz, r }
+  const blocks = [];   // { x0, x1, z0, z1 }
+
+  function edgeFall(x, z) {
+    const dx = Math.min(x + GREEN_W / 2, GREEN_W / 2 - x);
+    const dz = Math.min(z + GREEN_D / 2, GREEN_D / 2 - z);
+    return Math.max(0, Math.min(1, Math.min(dx, dz) / 2.5));
+  }
+  // Hauteur du terrain en (x,z) — pentes douces qui s'annulent aux bords.
+  function groundHeight(x, z) {
+    let h = features.tilt.x * x + features.tilt.z * z;
+    for (const m of features.mounds) {
+      const dx = x - m.cx, dz = z - m.cz;
+      h += m.amp * Math.exp(-(dx * dx + dz * dz) / (2 * m.sig * m.sig));
+    }
+    return h * edgeFall(x, z);
+  }
+  // Accélération due à la pente = -SLOPE_G · gradient(h) (la balle descend).
+  function terrainForceAt(x, z) {
+    const e = 0.2;
+    const hx = (groundHeight(x + e, z) - groundHeight(x - e, z)) / (2 * e);
+    const hz = (groundHeight(x, z + e) - groundHeight(x, z - e)) / (2 * e);
+    return { x: -SLOPE_G * hx, z: -SLOPE_G * hz };
+  }
+  function frictionAt(x, z) {
+    for (const bk of bunkers) if (Math.hypot(x - bk.cx, z - bk.cz) < bk.r) return MU_SAND;
+    return MU;
+  }
 
   // ---------- DOM ----------
   const canvas = document.getElementById("canvas");
@@ -247,106 +275,189 @@
   const sndWall = () => beep(140, 0.07, "sine", 0.10);
   const sndSink = () => { beep(520, 0.12, "sine", 0.2); setTimeout(() => beep(780, 0.18, "sine", 0.2), 110); };
 
-  // ---------- Three.js : scène ----------
+  // ---------- Three.js : renderer + scène ----------
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setClearColor(0x0d1b2a, 1);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.05;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x0d1b2a, 24, 46);
+  scene.fog = new THREE.Fog(0x0f2237, 26, 52);
+
+  // Ciel dégradé
+  function skyTexture() {
+    const c = document.createElement("canvas"); c.width = 4; c.height = 256;
+    const g = c.getContext("2d");
+    const grad = g.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, "#1d4266"); grad.addColorStop(0.55, "#12293f"); grad.addColorStop(1, "#0b1622");
+    g.fillStyle = grad; g.fillRect(0, 0, 4, 256);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+  }
+  scene.background = skyTexture();
 
   const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
 
-  // Lumières
-  const ambient = new THREE.AmbientLight(0xdfefff, 0.65);
-  scene.add(ambient);
-  const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-  sun.position.set(-8, 16, 10);
+  // Lumières : hémisphérique (ciel/sol) + soleil directionnel + soupçon d'ambiante
+  scene.add(new THREE.HemisphereLight(0xbcd8ff, 0x33502f, 0.85));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.12));
+  const sun = new THREE.DirectionalLight(0xfff2df, 2.3);
+  sun.position.set(-11, 19, 9);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
-  sun.shadow.camera.near = 1; sun.shadow.camera.far = 60;
-  sun.shadow.camera.left = -16; sun.shadow.camera.right = 16;
-  sun.shadow.camera.top = 16; sun.shadow.camera.bottom = -16;
-  sun.shadow.bias = -0.0005;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.near = 1; sun.shadow.camera.far = 70;
+  sun.shadow.camera.left = -15; sun.shadow.camera.right = 15;
+  sun.shadow.camera.top = 15; sun.shadow.camera.bottom = -15;
+  sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.02;
   scene.add(sun);
 
-  // Green (texture rayée "tonte" générée en canvas)
+  // Green en relief (heightfield)
   function makeGrassTexture() {
     const c = document.createElement("canvas"); c.width = 64; c.height = 64;
     const g = c.getContext("2d");
-    g.fillStyle = "#2f9e52"; g.fillRect(0, 0, 64, 64);
-    g.fillStyle = "#37b05d"; g.fillRect(0, 0, 32, 64);
+    g.fillStyle = "#3f9d57"; g.fillRect(0, 0, 64, 64);
+    g.fillStyle = "#368a4c"; g.fillRect(0, 0, 32, 64);
     const tex = new THREE.CanvasTexture(c);
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.repeat.set(GREEN_W / 2, GREEN_D / 2);
-    tex.magFilter = THREE.NearestFilter;
+    tex.repeat.set(GREEN_W, GREEN_D);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
     return tex;
   }
-  const green = new THREE.Mesh(
-    new THREE.PlaneGeometry(GREEN_W, GREEN_D),
-    new THREE.MeshStandardMaterial({ map: makeGrassTexture(), roughness: 1, metalness: 0 })
-  );
-  green.rotation.x = -Math.PI / 2;
+  const greenGeo = new THREE.PlaneGeometry(GREEN_W, GREEN_D, 48, 66);
+  greenGeo.rotateX(-Math.PI / 2);
+  const green = new THREE.Mesh(greenGeo, new THREE.MeshStandardMaterial({ map: makeGrassTexture(), roughness: 0.95, metalness: 0 }));
   green.receiveShadow = true;
   scene.add(green);
-
-  // Bordures (murs de rebond) — fines boîtes sombres
-  const edgeMat = new THREE.MeshStandardMaterial({ color: 0x14324a, roughness: 0.9 });
-  function addEdge(w, d, x, z) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.5, d), edgeMat);
-    m.position.set(x, 0.25, z); m.castShadow = true; m.receiveShadow = true; scene.add(m);
+  function updateGreenGeometry() {
+    const pos = greenGeo.attributes.position;
+    for (let i = 0; i < pos.count; i++) pos.setY(i, groundHeight(pos.getX(i), pos.getZ(i)));
+    pos.needsUpdate = true;
+    greenGeo.computeVertexNormals();
   }
-  addEdge(GREEN_W + 0.6, 0.3, 0, -GREEN_D / 2 - 0.15);
-  addEdge(GREEN_W + 0.6, 0.3, 0, GREEN_D / 2 + 0.15);
-  addEdge(0.3, GREEN_D + 0.6, -GREEN_W / 2 - 0.15, 0);
-  addEdge(0.3, GREEN_D + 0.6, GREEN_W / 2 + 0.15, 0);
 
-  // Trou (cylindre sombre encastré) + drapeau
+  // Bordures (murs de rebond)
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0x15334c, roughness: 0.9 });
+  function addEdge(w, d, x, z) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.6, d), edgeMat);
+    m.position.set(x, 0.3, z); m.castShadow = true; m.receiveShadow = true; scene.add(m);
+  }
+  addEdge(GREEN_W + 0.6, 0.35, 0, -GREEN_D / 2 - 0.15);
+  addEdge(GREEN_W + 0.6, 0.35, 0, GREEN_D / 2 + 0.15);
+  addEdge(0.35, GREEN_D + 0.6, -GREEN_W / 2 - 0.15, 0);
+  addEdge(0.35, GREEN_D + 0.6, GREEN_W / 2 + 0.15, 0);
+
+  // Trou + rebord blanc + drapeau
   const holeMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(HOLE_R, HOLE_R, 0.4, 28),
-    new THREE.MeshStandardMaterial({ color: 0x06131f, roughness: 1 })
+    new THREE.CylinderGeometry(HOLE_R, HOLE_R, 0.5, 28),
+    new THREE.MeshStandardMaterial({ color: 0x05101a, roughness: 1 })
   );
-  holeMesh.position.y = -0.2;
   scene.add(holeMesh);
-  const holeRing = new THREE.Mesh(
-    new THREE.RingGeometry(HOLE_R * 0.82, HOLE_R, 28),
-    new THREE.MeshBasicMaterial({ color: 0x0a1a28, side: THREE.DoubleSide })
+  const holeRim = new THREE.Mesh(
+    new THREE.RingGeometry(HOLE_R, HOLE_R + 0.06, 28),
+    new THREE.MeshStandardMaterial({ color: 0xf3f6ff, roughness: 0.7, side: THREE.DoubleSide })
   );
-  holeRing.rotation.x = -Math.PI / 2; holeRing.position.y = 0.011;
-  scene.add(holeRing);
+  holeRim.rotation.x = -Math.PI / 2;
+  scene.add(holeRim);
 
   const flag = new THREE.Group();
   const pole = new THREE.Mesh(
     new THREE.CylinderGeometry(0.03, 0.03, 2.6, 8),
-    new THREE.MeshStandardMaterial({ color: 0xe6f1ff, roughness: 0.6 })
+    new THREE.MeshStandardMaterial({ color: 0xe9f1ff, roughness: 0.5 })
   );
   pole.position.y = 1.3; pole.castShadow = true; flag.add(pole);
   const cloth = new THREE.Mesh(
     new THREE.PlaneGeometry(0.9, 0.55),
-    new THREE.MeshStandardMaterial({ color: 0xfb7185, side: THREE.DoubleSide, roughness: 0.8 })
+    new THREE.MeshStandardMaterial({ color: 0xfb7185, side: THREE.DoubleSide, roughness: 0.85 })
   );
-  cloth.position.set(0.45, 2.3, 0); flag.add(cloth);
+  cloth.position.set(0.45, 2.3, 0); cloth.castShadow = true; flag.add(cloth);
   scene.add(flag);
 
   // Balle
   const ballMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(BALL_R, 24, 18),
-    new THREE.MeshStandardMaterial({ color: 0xf6f4ea, roughness: 0.35, metalness: 0.05 })
+    new THREE.SphereGeometry(BALL_R, 32, 24),
+    new THREE.MeshStandardMaterial({ color: 0xf7f5ee, roughness: 0.3, metalness: 0.02 })
   );
-  ballMesh.castShadow = true; ballMesh.position.y = BALL_R;
+  ballMesh.castShadow = true;
   scene.add(ballMesh);
 
-  // Flèche de visée (au sol) : hampe + pointe, regroupées
+  // Flèche de visée
   const aimGroup = new THREE.Group();
   const aimMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.9 });
-  const shaft = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.16), aimMat);
-  shaft.rotation.x = -Math.PI / 2; shaft.position.set(0.5, 0.02, 0);
+  const shaft = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.14), aimMat);
+  shaft.rotation.x = -Math.PI / 2; shaft.position.set(0.5, 0, 0);
   aimGroup.add(shaft);
-  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5, 3), aimMat);
-  tip.rotation.x = -Math.PI / 2; tip.rotation.z = -Math.PI / 2; tip.position.set(1.15, 0.02, 0);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.45, 3), aimMat);
+  tip.rotation.x = -Math.PI / 2; tip.rotation.z = -Math.PI / 2; tip.position.set(1.15, 0, 0);
   aimGroup.add(tip);
   scene.add(aimGroup);
+
+  // Groupe des obstacles (rebâti à chaque trou)
+  const obstacleGroup = new THREE.Group();
+  scene.add(obstacleGroup);
+  const sandMat = new THREE.MeshStandardMaterial({ color: 0xdcc48a, roughness: 1 });
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x8b93a0, roughness: 0.85 });
+  function clearObstacles() {
+    while (obstacleGroup.children.length) {
+      const m = obstacleGroup.children.pop();
+      if (m.geometry) m.geometry.dispose();
+      obstacleGroup.remove(m);
+    }
+    bunkers.length = 0; blocks.length = 0;
+  }
+  function addBunkerMesh(cx, cz, r) {
+    const m = new THREE.Mesh(new THREE.CircleGeometry(r, 28), sandMat);
+    m.rotation.x = -Math.PI / 2; m.position.set(cx, groundHeight(cx, cz) + 0.02, cz);
+    m.receiveShadow = true; obstacleGroup.add(m);
+  }
+  function addBlockMesh(b, w, d, hgt) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, d), rockMat);
+    m.position.set(b.cx, groundHeight(b.cx, b.cz) + hgt / 2, b.cz);
+    m.castShadow = true; m.receiveShadow = true; obstacleGroup.add(m);
+  }
+  function farFromEnds(x, z, pad) {
+    return Math.hypot(x - ball.x, z - ball.z) > pad && Math.hypot(x - hole.x, z - hole.z) > pad;
+  }
+  function pointInBlock(x, z, b, pad) { return x > b.x0 - pad && x < b.x1 + pad && z > b.z0 - pad && z < b.z1 + pad; }
+
+  function genTerrainAndObstacles() {
+    // relief
+    features.tilt.x = rand(-0.05, 0.05);
+    features.tilt.z = rand(-0.05, 0.05);
+    features.mounds = [];
+    const nm = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < nm; i++) {
+      features.mounds.push({
+        cx: rand(minX + 1.5, maxX - 1.5), cz: rand(minZ + 1.5, maxZ - 1.5),
+        amp: rand(0.35, 0.65) * (Math.random() < 0.5 ? -1 : 1), sig: rand(2.4, 3.8),
+      });
+    }
+    updateGreenGeometry();
+    // obstacles
+    clearObstacles();
+    const nb = 1 + (Math.random() < 0.5 ? 0 : 1);
+    for (let i = 0; i < nb; i++) {
+      for (let a = 0; a < 40; a++) {
+        const c = randPos(2.2), r = rand(1.1, 1.7);
+        if (!farFromEnds(c.x, c.z, r + 1.6)) continue;
+        if (bunkers.some(b => Math.hypot(b.cx - c.x, b.cz - c.z) < b.r + r + 0.6)) continue;
+        bunkers.push({ cx: c.x, cz: c.z, r }); addBunkerMesh(c.x, c.z, r); break;
+      }
+    }
+    const nk = 1 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < nk; i++) {
+      for (let a = 0; a < 40; a++) {
+        const c = randPos(2.2), w = rand(1.1, 2.1), d = rand(1.1, 2.1);
+        const b = { x0: c.x - w / 2, x1: c.x + w / 2, z0: c.z - d / 2, z1: c.z + d / 2, cx: c.x, cz: c.z };
+        if (!farFromEnds(c.x, c.z, Math.max(w, d) / 2 + 1.6)) continue;
+        if (pointInBlock(ball.x, ball.z, b, BALL_R + 0.6) || pointInBlock(hole.x, hole.z, b, HOLE_R + 0.6)) continue;
+        if (bunkers.some(bk => Math.hypot(bk.cx - c.x, bk.cz - c.z) < bk.r + Math.max(w, d) / 2 + 0.5)) continue;
+        if (blocks.some(o => !(b.x1 < o.x0 - 0.5 || b.x0 > o.x1 + 0.5 || b.z1 < o.z0 - 0.5 || b.z0 > o.z1 + 0.5))) continue;
+        blocks.push(b); addBlockMesh(b, w, d, rand(0.7, 1.1)); break;
+      }
+    }
+  }
 
   // ---------- Caméra ----------
   const camLook = new THREE.Vector3();
@@ -356,9 +467,10 @@
     if (phase === "rolling" && Math.hypot(ball.vx, ball.vz) > 0.2) {
       const s = Math.hypot(ball.vx, ball.vz); dir = { x: ball.vx / s, z: ball.vz / s };
     } else dir = aimVec();
+    const gy = groundHeight(ball.x, ball.z);
     return {
-      pos: new THREE.Vector3(ball.x - dir.x * CAM_BACK, CAM_HEIGHT, ball.z - dir.z * CAM_BACK),
-      look: new THREE.Vector3(ball.x + dir.x * CAM_LOOK_AHEAD, 0.4, ball.z + dir.z * CAM_LOOK_AHEAD),
+      pos: new THREE.Vector3(ball.x - dir.x * CAM_BACK, gy + CAM_HEIGHT, ball.z - dir.z * CAM_BACK),
+      look: new THREE.Vector3(ball.x + dir.x * CAM_LOOK_AHEAD, gy + 0.4, ball.z + dir.z * CAM_LOOK_AHEAD),
     };
   }
   function snapCamera() {
@@ -390,21 +502,17 @@
   // ---------- Machine à états du pointeur ----------
   let pDown = false, pId = null, downX = 0, downY = 0, gesture = null, holdTimer = null;
   const MOVE_THRESH = 12, HOLD_DELAY = 150;
-
   function onDown(e) {
     if (phase !== "ready") return;
-    const p = e;
-    pDown = true; pId = p.pointerId; downX = p.clientX; downY = p.clientY; gesture = null;
-    aimAt(p.clientX, p.clientY);
-    try { canvas.setPointerCapture(p.pointerId); } catch (er) {}
+    pDown = true; pId = e.pointerId; downX = e.clientX; downY = e.clientY; gesture = null;
+    aimAt(e.clientX, e.clientY);
+    try { canvas.setPointerCapture(e.pointerId); } catch (er) {}
     clearTimeout(holdTimer);
-    holdTimer = setTimeout(() => {
-      if (pDown && gesture === null) { gesture = "charge"; startCharge(); }
-    }, HOLD_DELAY);
+    holdTimer = setTimeout(() => { if (pDown && gesture === null) { gesture = "charge"; startCharge(); } }, HOLD_DELAY);
     e.preventDefault();
   }
   function onMove(e) {
-    if (phase === "ready" && !pDown) { aimAt(e.clientX, e.clientY); return; } // survol (souris)
+    if (phase === "ready" && !pDown) { aimAt(e.clientX, e.clientY); return; }
     if (!pDown) return;
     const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
     if (gesture === null && dist > MOVE_THRESH) { gesture = "aim"; clearTimeout(holdTimer); }
@@ -416,8 +524,7 @@
     pDown = false; clearTimeout(holdTimer);
     try { canvas.releasePointerCapture(pId); } catch (er) {}
     if (gesture === "charge" && charging) fire();
-    gesture = null;
-    e.preventDefault();
+    gesture = null; e.preventDefault();
   }
   canvas.addEventListener("pointerdown", onDown);
   canvas.addEventListener("pointermove", onMove);
@@ -431,59 +538,75 @@
     return 1 - OSC_AMP * (0.5 - 0.5 * Math.cos((2 * Math.PI * p) / OSC_PERIOD));
   }
   function fire() {
-    const v = power * MAX_SPEED;
-    const d = aimVec();
+    const v = power * MAX_SPEED, d = aimVec();
     ball.vx = d.x * v; ball.vz = d.z * v;
-    charging = false;
-    phase = "rolling";
+    charging = false; phase = "rolling";
     strokesHole++; strokesTotal++;
-    updateHUD();
-    sndPutt(power);
+    updateHUD(); sndPutt(power);
   }
 
   // ---------- Physique ----------
+  function collideBlocks() {
+    for (const b of blocks) {
+      const inside = ball.x > b.x0 && ball.x < b.x1 && ball.z > b.z0 && ball.z < b.z1;
+      if (inside) {
+        const dl = ball.x - b.x0, dr = b.x1 - ball.x, dt = ball.z - b.z0, dbn = b.z1 - ball.z;
+        const m = Math.min(dl, dr, dt, dbn);
+        if (m === dl) { ball.x = b.x0 - BALL_R; ball.vx = -Math.abs(ball.vx) * REST; }
+        else if (m === dr) { ball.x = b.x1 + BALL_R; ball.vx = Math.abs(ball.vx) * REST; }
+        else if (m === dt) { ball.z = b.z0 - BALL_R; ball.vz = -Math.abs(ball.vz) * REST; }
+        else { ball.z = b.z1 + BALL_R; ball.vz = Math.abs(ball.vz) * REST; }
+        sndWall(); continue;
+      }
+      const cx = Math.max(b.x0, Math.min(ball.x, b.x1)), cz = Math.max(b.z0, Math.min(ball.z, b.z1));
+      const dx = ball.x - cx, dz = ball.z - cz, d2 = dx * dx + dz * dz;
+      if (d2 < BALL_R * BALL_R) {
+        const d = Math.sqrt(d2) || 0.0001, nx = dx / d, nz = dz / d;
+        ball.x = cx + nx * BALL_R; ball.z = cz + nz * BALL_R;
+        const vn = ball.vx * nx + ball.vz * nz;
+        if (vn < 0) { ball.vx -= (1 + REST) * vn * nx; ball.vz -= (1 + REST) * vn * nz; sndWall(); }
+      }
+    }
+  }
+
   function stepPhysics(h) {
-    // force du terrain (pentes futures)
+    // pente
     const f = terrainForceAt(ball.x, ball.z);
     ball.vx += f.x * h; ball.vz += f.z * h;
-
+    // friction (green ou sable)
     let sp = Math.hypot(ball.vx, ball.vz);
     if (sp > 0) {
-      const ns = Math.max(0, sp - MU * h);
-      ball.vx *= ns / sp; ball.vz *= ns / sp; sp = ns;
+      const mu = frictionAt(ball.x, ball.z);
+      const ns = Math.max(0, sp - mu * h);
+      ball.vx *= ns / sp; ball.vz *= ns / sp;
     }
     ball.x += ball.vx * h; ball.z += ball.vz * h;
-
-    // rebonds
+    // bords
     let bounced = false;
     if (ball.x < minX) { ball.x = minX; ball.vx = -ball.vx * REST; bounced = true; }
     else if (ball.x > maxX) { ball.x = maxX; ball.vx = -ball.vx * REST; bounced = true; }
     if (ball.z < minZ) { ball.z = minZ; ball.vz = -ball.vz * REST; bounced = true; }
     else if (ball.z > maxZ) { ball.z = maxZ; ball.vz = -ball.vz * REST; bounced = true; }
     if (bounced) sndWall();
-
-    // obstacles (extension future)
-    for (const o of obstacles) if (o.collide) o.collide(ball);
-
+    // rochers
+    collideBlocks();
     // trou
+    sp = Math.hypot(ball.vx, ball.vz);
     const dh = Math.hypot(ball.x - hole.x, ball.z - hole.z);
     if (dh < HOLE_R) {
       if (sp <= SINK_SPEED) { sink(); return; }
-      // lip-out : la balle est trop rapide, elle frôle et ressort
       if (sp <= SINK_SPEED * 1.7) {
         const nx = (ball.x - hole.x) / (dh || 1), nz = (ball.z - hole.z) / (dh || 1);
-        ball.vx = ball.vx * 0.8 + nx * 0.6;
-        ball.vz = ball.vz * 0.8 + nz * 0.6;
+        ball.vx = ball.vx * 0.8 + nx * 0.6; ball.vz = ball.vz * 0.8 + nz * 0.6;
       }
     }
-
     if (sp < STOP_EPS && !charging) { ball.vx = 0; ball.vz = 0; rest(); }
   }
 
   function rest() {
     if (phase !== "rolling") return;
     phase = "ready";
-    aim = Math.atan2(hole.z - ball.z, hole.x - ball.x); // vise le trou par défaut
+    aim = Math.atan2(hole.z - ball.z, hole.x - ball.x);
     updateIdealZone();
   }
 
@@ -500,7 +623,6 @@
     const par = strokesHole === 1 ? "Trou en un ! 🎉" : "Dans le trou en " + strokesHole + " coups !";
     showToast("⛳ " + par);
     if (holeNum >= RUN_HOLES) {
-      // Parcours de 9 trous terminé : on enregistre le total dans la progression.
       const total = strokesTotal, ace = runAce;
       setTimeout(function () {
         showToast("🏁 Parcours terminé : " + total + " coups !");
@@ -512,10 +634,7 @@
     }
   }
 
-  function newRun() {
-    holeNum = 1; strokesTotal = 0; runAce = false;
-    nextHole(true);
-  }
+  function newRun() { holeNum = 1; strokesTotal = 0; runAce = false; nextHole(true); }
 
   // ---------- Trous ----------
   function randPos(margin) {
@@ -526,21 +645,22 @@
   }
   function nextHole(first) {
     if (!first) holeNum++;
-    let h, b, guard = 0;
-    do {
-      h = randPos(1.2); b = randPos(1.2); guard++;
-    } while (Math.hypot(h.x - b.x, h.z - b.z) < 7 && guard < 200);
-    hole.x = h.x; hole.z = h.z;
-    ball.x = b.x; ball.z = b.z; ball.vx = 0; ball.vz = 0;
+    let hp, bp, guard = 0;
+    do { hp = randPos(1.3); bp = randPos(1.3); guard++; }
+    while (Math.hypot(hp.x - bp.x, hp.z - bp.z) < 7 && guard < 200);
+    hole.x = hp.x; hole.z = hp.z;
+    ball.x = bp.x; ball.z = bp.z; ball.vx = 0; ball.vz = 0;
     strokesHole = 0;
-    holeMesh.position.set(hole.x, -0.2, hole.z);
-    holeRing.position.set(hole.x, 0.011, hole.z);
-    flag.position.set(hole.x, 0, hole.z);
+    genTerrainAndObstacles();
+    const gh = groundHeight(hole.x, hole.z);
+    holeMesh.position.set(hole.x, gh - 0.25, hole.z);
+    holeRim.position.set(hole.x, gh + 0.008, hole.z);
+    flag.position.set(hole.x, gh, hole.z);
+    ballDisplayY = groundHeight(ball.x, ball.z) + BALL_R;
     phase = "ready";
     aim = Math.atan2(hole.z - ball.z, hole.x - ball.x);
     snapCamera();
-    updateHUD();
-    updateIdealZone();
+    updateHUD(); updateIdealZone();
   }
 
   // ---------- HUD ----------
@@ -552,19 +672,14 @@
   }
   function updateIdealZone() {
     const d = Math.hypot(hole.x - ball.x, hole.z - ball.z);
-    const vIdeal = Math.sqrt(2 * MU * d);
-    const idealPower = Math.min(1, vIdeal / MAX_SPEED);
+    const idealPower = Math.min(1, Math.sqrt(2 * MU * d) / MAX_SPEED);
     const tol = 0.055;
-    const left = Math.max(0, idealPower - tol) * 100;
-    const right = Math.min(1, idealPower + tol) * 100;
-    idealZone.style.left = left + "%";
-    idealZone.style.width = (right - left) + "%";
+    const left = Math.max(0, idealPower - tol) * 100, right = Math.min(1, idealPower + tol) * 100;
+    idealZone.style.left = left + "%"; idealZone.style.width = (right - left) + "%";
   }
   function updatePowerBar() {
     const pct = Math.round(power * 100);
-    powerFill.style.width = pct + "%";
-    powerMarker.style.left = pct + "%";
-    powerPct.textContent = pct + "%";
+    powerFill.style.width = pct + "%"; powerMarker.style.left = pct + "%"; powerPct.textContent = pct + "%";
   }
   let toastTimer = null;
   function showToast(txt) {
@@ -573,7 +688,7 @@
     toastTimer = setTimeout(() => toast.classList.remove("show"), 1600);
   }
 
-  // ---------- Rendu par image ----------
+  // ---------- Boucle ----------
   let lastT = 0, acc = 0;
   const FIXED = 1 / 120;
   function frame(t) {
@@ -583,37 +698,35 @@
     if (dt > 0.1) dt = 0.1;
 
     if (charging) { chargeT += dt; power = powerCurve(chargeT); }
-
     if (phase === "rolling") {
       acc += dt;
       while (acc >= FIXED) { stepPhysics(FIXED); acc -= FIXED; if (phase !== "rolling") { acc = 0; break; } }
     } else acc = 0;
 
-    // maj visuels
-    ballMesh.position.set(ball.x, BALL_R, ball.z);
-    aimGroup.position.set(ball.x, 0, ball.z);
-    aimGroup.rotation.y = -aim;
-    const showAim = (phase === "ready" || charging);
-    aimGroup.visible = showAim;
-    if (charging) {
-      const len = 0.6 + power * 3.2;
-      aimGroup.scale.set(len, 1, 1);
-    } else aimGroup.scale.set(1.4, 1, 1);
+    // balle posée sur le relief (ou tombant dans le trou)
+    const targetY = (phase === "sunk") ? (groundHeight(hole.x, hole.z) - BALL_R) : (groundHeight(ball.x, ball.z) + BALL_R);
+    ballDisplayY += (targetY - ballDisplayY) * 0.35;
+    ballMesh.position.set(ball.x, ballDisplayY, ball.z);
 
-    // caméra : suivi doux
+    // flèche de visée collée au sol
+    aimGroup.position.set(ball.x, groundHeight(ball.x, ball.z) + 0.04, ball.z);
+    aimGroup.rotation.y = -aim;
+    aimGroup.visible = (phase === "ready" || charging);
+    aimGroup.scale.set(charging ? (0.6 + power * 3.2) : 1.4, 1, 1);
+
+    // caméra
     const d = desiredCam();
     camera.position.lerp(d.pos, 0.12);
     camLook.lerp(d.look, 0.12);
     camera.lookAt(camLook);
 
-    // drapeau qui ondule légèrement
     cloth.rotation.y = Math.sin(t / 500) * 0.25;
 
     updatePowerBar();
     renderer.render(scene, camera);
   }
 
-  // ---------- Redimensionnement ----------
+  // ---------- Resize ----------
   function resize() {
     const w = stage.clientWidth, h = stage.clientHeight;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -626,17 +739,14 @@
   btnStart.addEventListener("click", () => {
     startOverlay.classList.add("hidden");
     try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
-    resize();
-    newRun();
+    resize(); newRun();
   });
   function openGolfLb() { if (window.LB) LB.openProfile("classement"); }
   document.getElementById("btnLb").addEventListener("click", openGolfLb);
   document.getElementById("btnLbStart").addEventListener("click", openGolfLb);
 
-  // Init (rendu de fond derrière l'overlay)
-  resize();
-  nextHole(true);
-  phase = "idle";
+  // Init (fond derrière l'overlay)
+  resize(); nextHole(true); phase = "idle";
   requestAnimationFrame(frame);
 })();
 </script>
