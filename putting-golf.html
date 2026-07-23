@@ -131,7 +131,7 @@
   <div class="stat"><div class="num best" id="sBest">—</div><div class="lbl">Record trou</div></div>
 </div>
 
-<div id="hint">Glisse pour viser · Maintiens pour charger · Relâche pour putter · Gare aux pentes, bunkers et rochers !</div>
+<div id="hint">Tire la balle vers l'arrière puis relâche pour putter · Plus tu tires loin, plus c'est puissant · Gare aux pentes, bunkers et rochers !</div>
 
 <div id="power">
   <div class="label"><span>Force</span><span id="powerPct">0%</span></div>
@@ -148,8 +148,8 @@
   <div class="big">⛳</div>
   <h1>Putting Golf</h1>
   <div class="sub">
-    Vise avec la souris ou le doigt, <b>maintiens</b> pour charger la jauge de force
-    (attention au timing, elle oscille au max !), puis <b>relâche</b> pour putter.
+    <b>Tire la balle vers l'arrière</b> avec la souris ou le doigt — comme une fronde —
+    puis <b>relâche</b> pour putter. Plus tu tires loin, plus le coup est puissant.
     Le green a du <b>relief</b> : lis les pentes, évite les <b>bunkers</b> (sable) et les <b>rochers</b>.
   </div>
   <button class="primary" id="btnStart">Commencer</button>
@@ -189,9 +189,7 @@
   const SINK_SPEED = 3.2;  // vitesse max pour tomber dans le trou
   const STOP_EPS = 0.05;   // seuil d'arrêt
 
-  const CHARGE_TIME = 1.15; // s pour atteindre le max
-  const OSC_AMP = 0.3;      // amplitude d'oscillation au max
-  const OSC_PERIOD = 0.85;  // s par oscillation
+  const MAX_PULL = 6.0;     // longueur de « tir en arrière » (u) donnant la puissance max
 
   const CAM_BACK = 7.5, CAM_HEIGHT = 4.2, CAM_LOOK_AHEAD = 5;
   const BEST_KEY = "golf.bestHole.v1";
@@ -206,7 +204,7 @@
   const hole = { x: 0, z: -6 };
   let aim = 0;
   let strokesHole = 0, strokesTotal = 0, holeNum = 1, runAce = false;
-  let charging = false, chargeT = 0, power = 0;
+  let aiming = false, power = 0;
   let ballDisplayY = BALL_R;
   let best = null;
   try { const b = parseInt(localStorage.getItem(BEST_KEY), 10); if (b > 0) best = b; } catch (e) {}
@@ -491,56 +489,48 @@
     if (raycaster.ray.intersectPlane(groundPlane, hitPoint)) return hitPoint;
     return null;
   }
-  function aimAt(clientX, clientY) {
-    const g = pointerToGround(clientX, clientY);
-    if (!g) return;
-    const dx = g.x - ball.x, dz = g.z - ball.z;
-    if (Math.hypot(dx, dz) < 0.3) return;
-    aim = Math.atan2(dz, dx);
-  }
-
-  // ---------- Machine à états du pointeur ----------
-  let pDown = false, pId = null, downX = 0, downY = 0, gesture = null, holdTimer = null;
-  const MOVE_THRESH = 12, HOLD_DELAY = 150;
+  // ---------- Tir : « tirer en arrière » sur la balle ----------
+  // On appuie, on glisse dans le sens OPPOSÉ à la cible (comme une fronde) :
+  // plus on tire la balle loin en arrière, plus le putt est puissant.
+  // On relâche pour frapper ; un petit tir (quasi immobile) annule le coup.
+  let pDown = false, pId = null;
+  const anchor = new THREE.Vector3();
   function onDown(e) {
     if (phase !== "ready") return;
-    pDown = true; pId = e.pointerId; downX = e.clientX; downY = e.clientY; gesture = null;
-    aimAt(e.clientX, e.clientY);
+    const g = pointerToGround(e.clientX, e.clientY);
+    anchor.set(g ? g.x : ball.x, 0, g ? g.z : ball.z);
+    pDown = true; pId = e.pointerId; aiming = true; power = 0;
     try { canvas.setPointerCapture(e.pointerId); } catch (er) {}
-    clearTimeout(holdTimer);
-    holdTimer = setTimeout(() => { if (pDown && gesture === null) { gesture = "charge"; startCharge(); } }, HOLD_DELAY);
     e.preventDefault();
   }
   function onMove(e) {
-    if (phase === "ready" && !pDown) { aimAt(e.clientX, e.clientY); return; }
     if (!pDown) return;
-    const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
-    if (gesture === null && dist > MOVE_THRESH) { gesture = "aim"; clearTimeout(holdTimer); }
-    if (gesture === "aim") aimAt(e.clientX, e.clientY);
+    const g = pointerToGround(e.clientX, e.clientY);
+    if (!g) return;
+    const px = g.x - anchor.x, pz = g.z - anchor.z;   // vecteur de traction
+    const pd = Math.hypot(px, pz);
+    if (pd > 0.2) {
+      aim = Math.atan2(-pz, -px);                      // la balle part à l'opposé
+      power = Math.min(1, pd / MAX_PULL);
+    } else power = 0;
     e.preventDefault();
   }
   function onUp(e) {
     if (!pDown) return;
-    pDown = false; clearTimeout(holdTimer);
+    pDown = false; aiming = false;
     try { canvas.releasePointerCapture(pId); } catch (er) {}
-    if (gesture === "charge" && charging) fire();
-    gesture = null; e.preventDefault();
+    if (power > 0.05) fire(); else power = 0;
+    e.preventDefault();
   }
   canvas.addEventListener("pointerdown", onDown);
   canvas.addEventListener("pointermove", onMove);
   canvas.addEventListener("pointerup", onUp);
   canvas.addEventListener("pointercancel", onUp);
 
-  function startCharge() { charging = true; chargeT = 0; power = 0; }
-  function powerCurve(t) {
-    if (t < CHARGE_TIME) return t / CHARGE_TIME;
-    const p = t - CHARGE_TIME;
-    return 1 - OSC_AMP * (0.5 - 0.5 * Math.cos((2 * Math.PI * p) / OSC_PERIOD));
-  }
   function fire() {
     const v = power * MAX_SPEED, d = aimVec();
     ball.vx = d.x * v; ball.vz = d.z * v;
-    charging = false; phase = "rolling";
+    aiming = false; phase = "rolling";
     strokesHole++; strokesTotal++;
     updateHUD(); sndPutt(power);
   }
@@ -600,12 +590,13 @@
         ball.vx = ball.vx * 0.8 + nx * 0.6; ball.vz = ball.vz * 0.8 + nz * 0.6;
       }
     }
-    if (sp < STOP_EPS && !charging) { ball.vx = 0; ball.vz = 0; rest(); }
+    if (sp < STOP_EPS) { ball.vx = 0; ball.vz = 0; rest(); }
   }
 
   function rest() {
     if (phase !== "rolling") return;
     phase = "ready";
+    power = 0;
     aim = Math.atan2(hole.z - ball.z, hole.x - ball.x);
     updateIdealZone();
   }
@@ -697,7 +688,6 @@
     let dt = (t - lastT) / 1000; lastT = t;
     if (dt > 0.1) dt = 0.1;
 
-    if (charging) { chargeT += dt; power = powerCurve(chargeT); }
     if (phase === "rolling") {
       acc += dt;
       while (acc >= FIXED) { stepPhysics(FIXED); acc -= FIXED; if (phase !== "rolling") { acc = 0; break; } }
@@ -711,8 +701,8 @@
     // flèche de visée collée au sol
     aimGroup.position.set(ball.x, groundHeight(ball.x, ball.z) + 0.04, ball.z);
     aimGroup.rotation.y = -aim;
-    aimGroup.visible = (phase === "ready" || charging);
-    aimGroup.scale.set(charging ? (0.6 + power * 3.2) : 1.4, 1, 1);
+    aimGroup.visible = (phase === "ready");
+    aimGroup.scale.set(aiming ? (0.6 + power * 3.2) : 1.4, 1, 1);
 
     // caméra
     const d = desiredCam();
