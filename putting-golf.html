@@ -204,7 +204,7 @@
   const ball = { x: 0, z: 6, vx: 0, vz: 0 };
   const hole = { x: 0, z: -6 };
   let aim = 0;                 // angle de visée (rad) dans le plan xz
-  let strokesHole = 0, strokesTotal = 0, holeNum = 1;
+  let strokesHole = 0, strokesTotal = 0, holeNum = 1, runAce = false;
   let charging = false, chargeT = 0, power = 0;
   let best = null;
   try { const b = parseInt(localStorage.getItem(BEST_KEY), 10); if (b > 0) best = b; } catch (e) {}
@@ -495,15 +495,17 @@
       best = strokesHole;
       try { localStorage.setItem(BEST_KEY, String(best)); } catch (e) {}
     }
+    if (strokesHole === 1) runAce = true;
     updateHUD();
     const par = strokesHole === 1 ? "Trou en un ! 🎉" : "Dans le trou en " + strokesHole + " coups !";
     showToast("⛳ " + par);
     if (holeNum >= RUN_HOLES) {
-      // Parcours terminé : on propose d'enregistrer le total au classement.
+      // Parcours de 9 trous terminé : on enregistre le total dans la progression.
+      const total = strokesTotal, ace = runAce;
       setTimeout(function () {
-        showToast("🏁 Parcours terminé : " + strokesTotal + " coups !");
-        if (window.LB) setTimeout(function () { LB.promptSubmit("golf", strokesTotal, "9 trous"); }, 900);
-        setTimeout(newRun, window.LB ? 1000 : 2200);
+        showToast("🏁 Parcours terminé : " + total + " coups !");
+        if (window.LB) LB.record("golf", { strokes: total, holeInOne: ace });
+        setTimeout(newRun, 2200);
       }, 1500);
     } else {
       setTimeout(nextHole, 1700);
@@ -511,7 +513,7 @@
   }
 
   function newRun() {
-    holeNum = 1; strokesTotal = 0;
+    holeNum = 1; strokesTotal = 0; runAce = false;
     nextHole(true);
   }
 
@@ -627,7 +629,7 @@
     resize();
     newRun();
   });
-  function openGolfLb() { if (window.LB) LB.open("golf"); }
+  function openGolfLb() { if (window.LB) LB.openProfile("classement"); }
   document.getElementById("btnLb").addEventListener("click", openGolfLb);
   document.getElementById("btnLbStart").addEventListener("click", openGolfLb);
 

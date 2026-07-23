@@ -273,7 +273,7 @@
     btnStart.textContent = "Rejouer";
     overlay.classList.remove("hidden");
     draw();
-    if (score > 0 && window.LB) setTimeout(function () { LB.promptSubmit("snake", score); }, 500);
+    if (window.LB) LB.record("snake", { score: score });
   }
 
   // ---- Rendering ----
@@ -388,7 +388,7 @@
   });
   btnPause.addEventListener("click", togglePause);
   btnRestart.addEventListener("click", start);
-  document.getElementById("btnLb").addEventListener("click", () => { if (window.LB) LB.open("snake"); });
+  document.getElementById("btnLb").addEventListener("click", () => { if (window.LB) LB.openProfile("classement"); });
 
   document.addEventListener("keydown", (e) => {
     const k = e.key.toLowerCase();

@@ -927,13 +927,10 @@
         const acc = Math.round(hitsCount / shots * 100);
         const score = Math.round(TOTAL_CELLS / shots * 1000 * DIFF_MULT[difficulty]);
         setStatus("🏆 Victoire ! Flotte ennemie coulée en " + shots + " coups.", "win");
-        if (window.LB) {
-          setTimeout(function () {
-            LB.promptSubmit("bataille", score, DIFF_LABEL[difficulty] + " · " + shots + " coups · " + acc + "%");
-          }, 500);
-        }
+        if (window.LB) LB.record("bataille", { win: true, difficulty: difficulty, shots: shots, score: score });
       } else {
         setStatus("☠️ Défaite… ta flotte a été anéantie. Retente ta chance !", "lose");
+        if (window.LB) LB.record("bataille", { win: false, difficulty: difficulty, shots: shots });
       }
     } else {
       setStatus("🏆 " + sides[winner].name + " remporte la bataille !", "win");
@@ -1136,7 +1133,7 @@
   });
   btnPlayCpu.addEventListener("click", () => startGame("cpu"));
   btnPlayPvp.addEventListener("click", () => startGame("pvp"));
-  btnOpenLb.addEventListener("click", () => { if (window.LB) LB.open("bataille"); else openLB(); });
+  btnOpenLb.addEventListener("click", () => { if (window.LB) LB.openProfile("classement"); else openLB(); });
 
   // pass overlay
   btnPassReady.addEventListener("click", () => {
