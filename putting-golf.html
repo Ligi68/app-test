@@ -125,9 +125,9 @@
 <a href="index.html" class="home-link">← Accueil</a>
 
 <div id="hud">
-  <div class="stat"><div class="num" id="sHole">1</div><div class="lbl">Trou</div></div>
+  <div class="stat"><div class="num" id="sHole">1/9</div><div class="lbl">Trou</div></div>
   <div class="stat"><div class="num" id="sStrokes">0</div><div class="lbl">Coups</div></div>
-  <div class="stat"><div class="num" id="sTotal">0</div><div class="lbl">Total</div></div>
+  <div class="stat"><div class="num" id="sTotal">0</div><div class="lbl">Parcours</div></div>
   <div class="stat"><div class="num best" id="sBest">—</div><div class="lbl">Record trou</div></div>
 </div>
 
@@ -153,8 +153,13 @@
     Rentre la balle dans le trou en un minimum de coups.
   </div>
   <button class="primary" id="btnStart">Commencer</button>
+  <button id="btnLbStart">🏆 Classement</button>
 </div>
 
+<button id="btnLb" style="position:fixed;top:12px;left:120px;z-index:10;background:rgba(13,27,42,.6);border:1px solid var(--line);color:var(--text);padding:6px 12px;border-radius:10px;font-size:.85rem;font-weight:600;cursor:pointer;backdrop-filter:blur(4px);">🏆</button>
+
+<!-- Classement partagé -->
+<script src="./leaderboard.js"></script>
 <!-- Three.js (build UMD local, r160, licence MIT — voir vendor/LICENSE) -->
 <script src="./vendor/three.min.js"></script>
 <script>
@@ -187,6 +192,7 @@
 
   const CAM_BACK = 7.5, CAM_HEIGHT = 4.2, CAM_LOOK_AHEAD = 5;
   const BEST_KEY = "golf.bestHole.v1";
+  const RUN_HOLES = 9;      // un parcours = 9 trous ; le total de coups alimente le classement
 
   const minX = -GREEN_W / 2 + WALL, maxX = GREEN_W / 2 - WALL;
   const minZ = -GREEN_D / 2 + WALL, maxZ = GREEN_D / 2 - WALL;
@@ -198,7 +204,7 @@
   const ball = { x: 0, z: 6, vx: 0, vz: 0 };
   const hole = { x: 0, z: -6 };
   let aim = 0;                 // angle de visée (rad) dans le plan xz
-  let strokesHole = 0, strokesTotal = 0, holeNum = 1;
+  let strokesHole = 0, strokesTotal = 0, holeNum = 1, runAce = false;
   let charging = false, chargeT = 0, power = 0;
   let best = null;
   try { const b = parseInt(localStorage.getItem(BEST_KEY), 10); if (b > 0) best = b; } catch (e) {}
@@ -489,10 +495,26 @@
       best = strokesHole;
       try { localStorage.setItem(BEST_KEY, String(best)); } catch (e) {}
     }
+    if (strokesHole === 1) runAce = true;
     updateHUD();
     const par = strokesHole === 1 ? "Trou en un ! 🎉" : "Dans le trou en " + strokesHole + " coups !";
     showToast("⛳ " + par);
-    setTimeout(nextHole, 1700);
+    if (holeNum >= RUN_HOLES) {
+      // Parcours de 9 trous terminé : on enregistre le total dans la progression.
+      const total = strokesTotal, ace = runAce;
+      setTimeout(function () {
+        showToast("🏁 Parcours terminé : " + total + " coups !");
+        if (window.LB) LB.record("golf", { strokes: total, holeInOne: ace });
+        setTimeout(newRun, 2200);
+      }, 1500);
+    } else {
+      setTimeout(nextHole, 1700);
+    }
+  }
+
+  function newRun() {
+    holeNum = 1; strokesTotal = 0; runAce = false;
+    nextHole(true);
   }
 
   // ---------- Trous ----------
@@ -523,7 +545,7 @@
 
   // ---------- HUD ----------
   function updateHUD() {
-    sHole.textContent = holeNum;
+    sHole.textContent = holeNum + "/" + RUN_HOLES;
     sStrokes.textContent = strokesHole;
     sTotal.textContent = strokesTotal;
     sBest.textContent = best === null ? "—" : best;
@@ -605,8 +627,11 @@
     startOverlay.classList.add("hidden");
     try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
     resize();
-    nextHole(true);
+    newRun();
   });
+  function openGolfLb() { if (window.LB) LB.openProfile("classement"); }
+  document.getElementById("btnLb").addEventListener("click", openGolfLb);
+  document.getElementById("btnLbStart").addEventListener("click", openGolfLb);
 
   // Init (rendu de fond derrière l'overlay)
   resize();

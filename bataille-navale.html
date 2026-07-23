@@ -380,6 +380,7 @@
   </div>
 </div>
 
+<script src="./leaderboard.js"></script>
 <script>
 (function () {
   "use strict";
@@ -925,13 +926,11 @@
       if (winner === "A") {
         const acc = Math.round(hitsCount / shots * 100);
         const score = Math.round(TOTAL_CELLS / shots * 1000 * DIFF_MULT[difficulty]);
-        pendingScore = { score, shots, difficulty };
         setStatus("🏆 Victoire ! Flotte ennemie coulée en " + shots + " coups.", "win");
-        scoreLine.textContent = "Score : " + score + "  ·  " + shots + " coups  ·  " + acc + "% de précision";
-        nameInput.value = "";
-        saveBox.classList.remove("hidden");
+        if (window.LB) LB.record("bataille", { win: true, difficulty: difficulty, shots: shots, score: score });
       } else {
         setStatus("☠️ Défaite… ta flotte a été anéantie. Retente ta chance !", "lose");
+        if (window.LB) LB.record("bataille", { win: false, difficulty: difficulty, shots: shots });
       }
     } else {
       setStatus("🏆 " + sides[winner].name + " remporte la bataille !", "win");
@@ -1134,7 +1133,7 @@
   });
   btnPlayCpu.addEventListener("click", () => startGame("cpu"));
   btnPlayPvp.addEventListener("click", () => startGame("pvp"));
-  btnOpenLb.addEventListener("click", openLB);
+  btnOpenLb.addEventListener("click", () => { if (window.LB) LB.openProfile("classement"); else openLB(); });
 
   // pass overlay
   btnPassReady.addEventListener("click", () => {
