@@ -11,6 +11,7 @@
     --sea-line: #234a6b;
     --accent: #38bdf8;
     --snake: #34d399;
+    --golf: #4ade80;
     --text: #e6f1ff;
     --muted: #8ea9c1;
   }
@@ -60,8 +61,10 @@
     margin-top: 8px; font-weight: 700; font-size: .9rem;
     padding: 9px 20px; border-radius: 10px;
   }
+  .game-card.golf:hover { border-color: var(--golf); }
   .navy .play { background: linear-gradient(135deg, var(--accent), #0ea5e9); color: #04263b; }
   .snake .play { background: linear-gradient(135deg, var(--snake), #10b981); color: #04261a; }
+  .golf .play { background: linear-gradient(135deg, var(--golf), #22c55e); color: #04261a; }
 
   footer { margin-top: 40px; color: var(--muted); font-size: .78rem; text-align: center; }
 </style>
@@ -84,6 +87,13 @@
     <div class="emoji">🐍</div>
     <h2>Snake</h2>
     <p>Mange les pommes, grandis et bats ton record sans te mordre la queue.</p>
+    <span class="play">Jouer →</span>
+  </a>
+
+  <a class="game-card golf" href="putting-golf.html">
+    <div class="emoji">⛳</div>
+    <h2>Putting Golf</h2>
+    <p>Vise, dose ta force et rentre la balle dans le trou en 3D, coup après coup.</p>
     <span class="play">Jouer →</span>
   </a>
 </div>

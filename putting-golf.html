@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Putting Golf</title>
+<style>
+  :root {
+    --bg: #0d1b2a;
+    --panel: #13293d;
+    --panel-2: #1b3a54;
+    --line: #234a6b;
+    --accent: #38bdf8;
+    --green: #4ade80;
+    --text: #e6f1ff;
+    --muted: #8ea9c1;
+    --gold: #fbbf24;
+    --ideal: #4ade80;
+    --power: #fb7185;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  #stage { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+  a.home-link {
+    position: fixed; top: 12px; left: 14px; z-index: 10;
+    color: var(--text); text-decoration: none; font-size: .85rem; font-weight: 600;
+    background: rgba(13,27,42,.6); padding: 6px 12px; border-radius: 10px;
+    border: 1px solid var(--line); backdrop-filter: blur(4px);
+  }
+
+  /* ---- HUD (2D overlay) ---- */
+  #hud {
+    position: fixed; top: 12px; right: 14px; z-index: 8;
+    display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;
+  }
+  .stat {
+    background: rgba(13,27,42,.6); border: 1px solid var(--line);
+    border-radius: 10px; padding: 6px 12px; text-align: center; min-width: 64px;
+    backdrop-filter: blur(4px);
+  }
+  .stat .num { font-size: 1.05rem; font-weight: 700; color: var(--accent); }
+  .stat .num.best { color: var(--gold); }
+  .stat .lbl { font-size: .62rem; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+
+  #hint {
+    position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%); z-index: 8;
+    color: var(--muted); font-size: .8rem; text-align: center; width: 92%; max-width: 460px;
+    pointer-events: none; text-shadow: 0 1px 4px rgba(0,0,0,.6);
+  }
+
+  /* Power gauge */
+  #power {
+    position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 8;
+    width: min(78vw, 420px);
+  }
+  #power .label { display: flex; justify-content: space-between; font-size: .68rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; padding: 0 2px; }
+  #power .track {
+    position: relative; height: 20px; border-radius: 11px;
+    background: rgba(13,27,42,.75); border: 1px solid var(--line); overflow: hidden;
+    backdrop-filter: blur(4px);
+  }
+  #power .ideal {
+    position: absolute; top: 0; bottom: 0; background: rgba(74,222,128,.4);
+    border-left: 2px solid var(--ideal); border-right: 2px solid var(--ideal);
+  }
+  #power .fill {
+    position: absolute; top: 0; bottom: 0; left: 0; width: 0%;
+    background: linear-gradient(90deg, #fbbf24, var(--power));
+    transition: width .02s linear;
+  }
+  #power .marker {
+    position: absolute; top: -3px; bottom: -3px; width: 3px; background: #fff;
+    box-shadow: 0 0 6px rgba(255,255,255,.8); left: 0%;
+  }
+
+  /* Overlays / messages */
+  .overlay {
+    position: fixed; inset: 0; z-index: 20;
+    background: rgba(6, 15, 26, .72);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; text-align: center; padding: 24px; backdrop-filter: blur(3px);
+  }
+  .overlay.hidden { display: none; }
+  .overlay .big { font-size: 3rem; }
+  .overlay h1 {
+    font-size: clamp(1.6rem, 6vw, 2.4rem); letter-spacing: 2px; text-transform: uppercase;
+    background: linear-gradient(90deg, var(--green), #86efac);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .overlay .msg { font-size: 1.2rem; font-weight: 600; }
+  .overlay .sub { color: var(--muted); font-size: .9rem; max-width: 340px; line-height: 1.5; }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    padding: 12px 24px; font-size: .95rem; border-radius: 10px; cursor: pointer; font-weight: 600;
+    transition: transform .08s, background .15s, border-color .15s;
+  }
+  button:hover { background: #274b6b; border-color: var(--green); }
+  button:active { transform: translateY(1px); }
+  button.primary { background: linear-gradient(135deg, var(--green), #22c55e); color: #04261a; border: none; }
+
+  #toast {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 15;
+    background: rgba(6,15,26,.85); border: 1px solid var(--green);
+    padding: 18px 28px; border-radius: 16px; text-align: center;
+    font-size: 1.3rem; font-weight: 700; color: var(--green);
+    box-shadow: 0 10px 40px rgba(0,0,0,.5); pointer-events: none;
+    opacity: 0; transition: opacity .25s, transform .25s;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%,-56%); }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="canvas"></canvas></div>
+
+<a href="index.html" class="home-link">← Accueil</a>
+
+<div id="hud">
+  <div class="stat"><div class="num" id="sHole">1</div><div class="lbl">Trou</div></div>
+  <div class="stat"><div class="num" id="sStrokes">0</div><div class="lbl">Coups</div></div>
+  <div class="stat"><div class="num" id="sTotal">0</div><div class="lbl">Total</div></div>
+  <div class="stat"><div class="num best" id="sBest">—</div><div class="lbl">Record trou</div></div>
+</div>
+
+<div id="hint">Glisse pour viser · Maintiens pour charger la force · Relâche pour putter</div>
+
+<div id="power">
+  <div class="label"><span>Force</span><span id="powerPct">0%</span></div>
+  <div class="track">
+    <div class="ideal" id="idealZone"></div>
+    <div class="fill" id="powerFill"></div>
+    <div class="marker" id="powerMarker"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<div class="overlay" id="startOverlay">
+  <div class="big">⛳</div>
+  <h1>Putting Golf</h1>
+  <div class="sub">
+    Vise avec la souris ou le doigt, <b>maintiens</b> pour charger la jauge de force
+    (attention au timing, elle oscille au max !), puis <b>relâche</b> pour putter.
+    Rentre la balle dans le trou en un minimum de coups.
+  </div>
+  <button class="primary" id="btnStart">Commencer</button>
+</div>
+
+<!-- Three.js (build UMD local, r160, licence MIT — voir vendor/LICENSE) -->
+<script src="./vendor/three.min.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  if (!window.THREE) {
+    document.getElementById("startOverlay").innerHTML =
+      '<div class="sub">Impossible de charger le moteur 3D (vendor/three.min.js).</div>';
+    return;
+  }
+  const THREE = window.THREE;
+
+  // ---------- Constantes de jeu ----------
+  const GREEN_W = 16;      // largeur du green (axe x)
+  const GREEN_D = 22;      // profondeur du green (axe z)
+  const BALL_R = 0.34;
+  const HOLE_R = 0.5;
+  const WALL = 0.35;       // marge de rebond depuis le bord
+
+  const MU = 1.7;          // décélération par friction (u/s^2)
+  const MAX_SPEED = 10.5;  // vitesse initiale à pleine puissance
+  const REST = 0.7;        // amortissement des rebonds
+  const SINK_SPEED = 3.2;  // vitesse max pour tomber dans le trou
+  const STOP_EPS = 0.05;   // seuil d'arrêt
+
+  const CHARGE_TIME = 1.15; // s pour atteindre le max
+  const OSC_AMP = 0.3;      // amplitude d'oscillation au max
+  const OSC_PERIOD = 0.85;  // s par oscillation
+
+  const CAM_BACK = 7.5, CAM_HEIGHT = 4.2, CAM_LOOK_AHEAD = 5;
+  const BEST_KEY = "golf.bestHole.v1";
+
+  const minX = -GREEN_W / 2 + WALL, maxX = GREEN_W / 2 - WALL;
+  const minZ = -GREEN_D / 2 + WALL, maxZ = GREEN_D / 2 - WALL;
+
+  // ---------- État ----------
+  // phase: 'idle' (avant départ) | 'ready' (balle à l'arrêt, on peut viser/tirer)
+  //        'rolling' (balle en mouvement) | 'sunk' (dans le trou)
+  let phase = "idle";
+  const ball = { x: 0, z: 6, vx: 0, vz: 0 };
+  const hole = { x: 0, z: -6 };
+  let aim = 0;                 // angle de visée (rad) dans le plan xz
+  let strokesHole = 0, strokesTotal = 0, holeNum = 1;
+  let charging = false, chargeT = 0, power = 0;
+  let best = null;
+  try { const b = parseInt(localStorage.getItem(BEST_KEY), 10); if (b > 0) best = b; } catch (e) {}
+
+  // ---------- Extensibilité (pentes / obstacles v2) ----------
+  // Renvoie l'accélération due au terrain à une position (x,z). v1 : plat.
+  function terrainForceAt(x, z) { return { x: 0, z: 0 }; }
+  const obstacles = []; // future extension : { collide(ball) {...} }
+
+  // ---------- DOM ----------
+  const canvas = document.getElementById("canvas");
+  const stage = document.getElementById("stage");
+  const sHole = document.getElementById("sHole");
+  const sStrokes = document.getElementById("sStrokes");
+  const sTotal = document.getElementById("sTotal");
+  const sBest = document.getElementById("sBest");
+  const powerFill = document.getElementById("powerFill");
+  const powerMarker = document.getElementById("powerMarker");
+  const powerPct = document.getElementById("powerPct");
+  const idealZone = document.getElementById("idealZone");
+  const toast = document.getElementById("toast");
+  const startOverlay = document.getElementById("startOverlay");
+  const btnStart = document.getElementById("btnStart");
+
+  // ---------- Audio ----------
+  let actx = null;
+  function beep(freq, dur, type, vol) {
+    try {
+      if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, actx.currentTime);
+      g.gain.exponentialRampToValueAtTime(vol || 0.16, actx.currentTime + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
+      o.connect(g); g.connect(actx.destination);
+      o.start(); o.stop(actx.currentTime + dur);
+    } catch (e) {}
+  }
+  const sndPutt = (p) => beep(180 + p * 220, 0.09, "triangle", 0.18);
+  const sndWall = () => beep(140, 0.07, "sine", 0.10);
+  const sndSink = () => { beep(520, 0.12, "sine", 0.2); setTimeout(() => beep(780, 0.18, "sine", 0.2), 110); };
+
+  // ---------- Three.js : scène ----------
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setClearColor(0x0d1b2a, 1);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x0d1b2a, 24, 46);
+
+  const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
+
+  // Lumières
+  const ambient = new THREE.AmbientLight(0xdfefff, 0.65);
+  scene.add(ambient);
+  const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+  sun.position.set(-8, 16, 10);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.camera.near = 1; sun.shadow.camera.far = 60;
+  sun.shadow.camera.left = -16; sun.shadow.camera.right = 16;
+  sun.shadow.camera.top = 16; sun.shadow.camera.bottom = -16;
+  sun.shadow.bias = -0.0005;
+  scene.add(sun);
+
+  // Green (texture rayée "tonte" générée en canvas)
+  function makeGrassTexture() {
+    const c = document.createElement("canvas"); c.width = 64; c.height = 64;
+    const g = c.getContext("2d");
+    g.fillStyle = "#2f9e52"; g.fillRect(0, 0, 64, 64);
+    g.fillStyle = "#37b05d"; g.fillRect(0, 0, 32, 64);
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(GREEN_W / 2, GREEN_D / 2);
+    tex.magFilter = THREE.NearestFilter;
+    return tex;
+  }
+  const green = new THREE.Mesh(
+    new THREE.PlaneGeometry(GREEN_W, GREEN_D),
+    new THREE.MeshStandardMaterial({ map: makeGrassTexture(), roughness: 1, metalness: 0 })
+  );
+  green.rotation.x = -Math.PI / 2;
+  green.receiveShadow = true;
+  scene.add(green);
+
+  // Bordures (murs de rebond) — fines boîtes sombres
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0x14324a, roughness: 0.9 });
+  function addEdge(w, d, x, z) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.5, d), edgeMat);
+    m.position.set(x, 0.25, z); m.castShadow = true; m.receiveShadow = true; scene.add(m);
+  }
+  addEdge(GREEN_W + 0.6, 0.3, 0, -GREEN_D / 2 - 0.15);
+  addEdge(GREEN_W + 0.6, 0.3, 0, GREEN_D / 2 + 0.15);
+  addEdge(0.3, GREEN_D + 0.6, -GREEN_W / 2 - 0.15, 0);
+  addEdge(0.3, GREEN_D + 0.6, GREEN_W / 2 + 0.15, 0);
+
+  // Trou (cylindre sombre encastré) + drapeau
+  const holeMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(HOLE_R, HOLE_R, 0.4, 28),
+    new THREE.MeshStandardMaterial({ color: 0x06131f, roughness: 1 })
+  );
+  holeMesh.position.y = -0.2;
+  scene.add(holeMesh);
+  const holeRing = new THREE.Mesh(
+    new THREE.RingGeometry(HOLE_R * 0.82, HOLE_R, 28),
+    new THREE.MeshBasicMaterial({ color: 0x0a1a28, side: THREE.DoubleSide })
+  );
+  holeRing.rotation.x = -Math.PI / 2; holeRing.position.y = 0.011;
+  scene.add(holeRing);
+
+  const flag = new THREE.Group();
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.03, 0.03, 2.6, 8),
+    new THREE.MeshStandardMaterial({ color: 0xe6f1ff, roughness: 0.6 })
+  );
+  pole.position.y = 1.3; pole.castShadow = true; flag.add(pole);
+  const cloth = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.9, 0.55),
+    new THREE.MeshStandardMaterial({ color: 0xfb7185, side: THREE.DoubleSide, roughness: 0.8 })
+  );
+  cloth.position.set(0.45, 2.3, 0); flag.add(cloth);
+  scene.add(flag);
+
+  // Balle
+  const ballMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(BALL_R, 24, 18),
+    new THREE.MeshStandardMaterial({ color: 0xf6f4ea, roughness: 0.35, metalness: 0.05 })
+  );
+  ballMesh.castShadow = true; ballMesh.position.y = BALL_R;
+  scene.add(ballMesh);
+
+  // Flèche de visée (au sol) : hampe + pointe, regroupées
+  const aimGroup = new THREE.Group();
+  const aimMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.9 });
+  const shaft = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.16), aimMat);
+  shaft.rotation.x = -Math.PI / 2; shaft.position.set(0.5, 0.02, 0);
+  aimGroup.add(shaft);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5, 3), aimMat);
+  tip.rotation.x = -Math.PI / 2; tip.rotation.z = -Math.PI / 2; tip.position.set(1.15, 0.02, 0);
+  aimGroup.add(tip);
+  scene.add(aimGroup);
+
+  // ---------- Caméra ----------
+  const camLook = new THREE.Vector3();
+  function aimVec() { return { x: Math.cos(aim), z: Math.sin(aim) }; }
+  function desiredCam() {
+    let dir;
+    if (phase === "rolling" && Math.hypot(ball.vx, ball.vz) > 0.2) {
+      const s = Math.hypot(ball.vx, ball.vz); dir = { x: ball.vx / s, z: ball.vz / s };
+    } else dir = aimVec();
+    return {
+      pos: new THREE.Vector3(ball.x - dir.x * CAM_BACK, CAM_HEIGHT, ball.z - dir.z * CAM_BACK),
+      look: new THREE.Vector3(ball.x + dir.x * CAM_LOOK_AHEAD, 0.4, ball.z + dir.z * CAM_LOOK_AHEAD),
+    };
+  }
+  function snapCamera() {
+    const d = desiredCam();
+    camera.position.copy(d.pos); camLook.copy(d.look); camera.lookAt(camLook);
+  }
+
+  // ---------- Visée par pointeur ----------
+  const raycaster = new THREE.Raycaster();
+  const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const ndc = new THREE.Vector2();
+  const hitPoint = new THREE.Vector3();
+  function pointerToGround(clientX, clientY) {
+    const r = canvas.getBoundingClientRect();
+    ndc.x = ((clientX - r.left) / r.width) * 2 - 1;
+    ndc.y = -(((clientY - r.top) / r.height) * 2 - 1);
+    raycaster.setFromCamera(ndc, camera);
+    if (raycaster.ray.intersectPlane(groundPlane, hitPoint)) return hitPoint;
+    return null;
+  }
+  function aimAt(clientX, clientY) {
+    const g = pointerToGround(clientX, clientY);
+    if (!g) return;
+    const dx = g.x - ball.x, dz = g.z - ball.z;
+    if (Math.hypot(dx, dz) < 0.3) return;
+    aim = Math.atan2(dz, dx);
+  }
+
+  // ---------- Machine à états du pointeur ----------
+  let pDown = false, pId = null, downX = 0, downY = 0, gesture = null, holdTimer = null;
+  const MOVE_THRESH = 12, HOLD_DELAY = 150;
+
+  function onDown(e) {
+    if (phase !== "ready") return;
+    const p = e;
+    pDown = true; pId = p.pointerId; downX = p.clientX; downY = p.clientY; gesture = null;
+    aimAt(p.clientX, p.clientY);
+    try { canvas.setPointerCapture(p.pointerId); } catch (er) {}
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => {
+      if (pDown && gesture === null) { gesture = "charge"; startCharge(); }
+    }, HOLD_DELAY);
+    e.preventDefault();
+  }
+  function onMove(e) {
+    if (phase === "ready" && !pDown) { aimAt(e.clientX, e.clientY); return; } // survol (souris)
+    if (!pDown) return;
+    const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
+    if (gesture === null && dist > MOVE_THRESH) { gesture = "aim"; clearTimeout(holdTimer); }
+    if (gesture === "aim") aimAt(e.clientX, e.clientY);
+    e.preventDefault();
+  }
+  function onUp(e) {
+    if (!pDown) return;
+    pDown = false; clearTimeout(holdTimer);
+    try { canvas.releasePointerCapture(pId); } catch (er) {}
+    if (gesture === "charge" && charging) fire();
+    gesture = null;
+    e.preventDefault();
+  }
+  canvas.addEventListener("pointerdown", onDown);
+  canvas.addEventListener("pointermove", onMove);
+  canvas.addEventListener("pointerup", onUp);
+  canvas.addEventListener("pointercancel", onUp);
+
+  function startCharge() { charging = true; chargeT = 0; power = 0; }
+  function powerCurve(t) {
+    if (t < CHARGE_TIME) return t / CHARGE_TIME;
+    const p = t - CHARGE_TIME;
+    return 1 - OSC_AMP * (0.5 - 0.5 * Math.cos((2 * Math.PI * p) / OSC_PERIOD));
+  }
+  function fire() {
+    const v = power * MAX_SPEED;
+    const d = aimVec();
+    ball.vx = d.x * v; ball.vz = d.z * v;
+    charging = false;
+    phase = "rolling";
+    strokesHole++; strokesTotal++;
+    updateHUD();
+    sndPutt(power);
+  }
+
+  // ---------- Physique ----------
+  function stepPhysics(h) {
+    // force du terrain (pentes futures)
+    const f = terrainForceAt(ball.x, ball.z);
+    ball.vx += f.x * h; ball.vz += f.z * h;
+
+    let sp = Math.hypot(ball.vx, ball.vz);
+    if (sp > 0) {
+      const ns = Math.max(0, sp - MU * h);
+      ball.vx *= ns / sp; ball.vz *= ns / sp; sp = ns;
+    }
+    ball.x += ball.vx * h; ball.z += ball.vz * h;
+
+    // rebonds
+    let bounced = false;
+    if (ball.x < minX) { ball.x = minX; ball.vx = -ball.vx * REST; bounced = true; }
+    else if (ball.x > maxX) { ball.x = maxX; ball.vx = -ball.vx * REST; bounced = true; }
+    if (ball.z < minZ) { ball.z = minZ; ball.vz = -ball.vz * REST; bounced = true; }
+    else if (ball.z > maxZ) { ball.z = maxZ; ball.vz = -ball.vz * REST; bounced = true; }
+    if (bounced) sndWall();
+
+    // obstacles (extension future)
+    for (const o of obstacles) if (o.collide) o.collide(ball);
+
+    // trou
+    const dh = Math.hypot(ball.x - hole.x, ball.z - hole.z);
+    if (dh < HOLE_R) {
+      if (sp <= SINK_SPEED) { sink(); return; }
+      // lip-out : la balle est trop rapide, elle frôle et ressort
+      if (sp <= SINK_SPEED * 1.7) {
+        const nx = (ball.x - hole.x) / (dh || 1), nz = (ball.z - hole.z) / (dh || 1);
+        ball.vx = ball.vx * 0.8 + nx * 0.6;
+        ball.vz = ball.vz * 0.8 + nz * 0.6;
+      }
+    }
+
+    if (sp < STOP_EPS && !charging) { ball.vx = 0; ball.vz = 0; rest(); }
+  }
+
+  function rest() {
+    if (phase !== "rolling") return;
+    phase = "ready";
+    aim = Math.atan2(hole.z - ball.z, hole.x - ball.x); // vise le trou par défaut
+    updateIdealZone();
+  }
+
+  function sink() {
+    ball.vx = 0; ball.vz = 0;
+    phase = "sunk";
+    sndSink();
+    if (best === null || strokesHole < best) {
+      best = strokesHole;
+      try { localStorage.setItem(BEST_KEY, String(best)); } catch (e) {}
+    }
+    updateHUD();
+    const par = strokesHole === 1 ? "Trou en un ! 🎉" : "Dans le trou en " + strokesHole + " coups !";
+    showToast("⛳ " + par);
+    setTimeout(nextHole, 1700);
+  }
+
+  // ---------- Trous ----------
+  function randPos(margin) {
+    return {
+      x: minX + margin + Math.random() * (maxX - minX - 2 * margin),
+      z: minZ + margin + Math.random() * (maxZ - minZ - 2 * margin),
+    };
+  }
+  function nextHole(first) {
+    if (!first) holeNum++;
+    let h, b, guard = 0;
+    do {
+      h = randPos(1.2); b = randPos(1.2); guard++;
+    } while (Math.hypot(h.x - b.x, h.z - b.z) < 7 && guard < 200);
+    hole.x = h.x; hole.z = h.z;
+    ball.x = b.x; ball.z = b.z; ball.vx = 0; ball.vz = 0;
+    strokesHole = 0;
+    holeMesh.position.set(hole.x, -0.2, hole.z);
+    holeRing.position.set(hole.x, 0.011, hole.z);
+    flag.position.set(hole.x, 0, hole.z);
+    phase = "ready";
+    aim = Math.atan2(hole.z - ball.z, hole.x - ball.x);
+    snapCamera();
+    updateHUD();
+    updateIdealZone();
+  }
+
+  // ---------- HUD ----------
+  function updateHUD() {
+    sHole.textContent = holeNum;
+    sStrokes.textContent = strokesHole;
+    sTotal.textContent = strokesTotal;
+    sBest.textContent = best === null ? "—" : best;
+  }
+  function updateIdealZone() {
+    const d = Math.hypot(hole.x - ball.x, hole.z - ball.z);
+    const vIdeal = Math.sqrt(2 * MU * d);
+    const idealPower = Math.min(1, vIdeal / MAX_SPEED);
+    const tol = 0.055;
+    const left = Math.max(0, idealPower - tol) * 100;
+    const right = Math.min(1, idealPower + tol) * 100;
+    idealZone.style.left = left + "%";
+    idealZone.style.width = (right - left) + "%";
+  }
+  function updatePowerBar() {
+    const pct = Math.round(power * 100);
+    powerFill.style.width = pct + "%";
+    powerMarker.style.left = pct + "%";
+    powerPct.textContent = pct + "%";
+  }
+  let toastTimer = null;
+  function showToast(txt) {
+    toast.textContent = txt; toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("show"), 1600);
+  }
+
+  // ---------- Rendu par image ----------
+  let lastT = 0, acc = 0;
+  const FIXED = 1 / 120;
+  function frame(t) {
+    requestAnimationFrame(frame);
+    if (!lastT) lastT = t;
+    let dt = (t - lastT) / 1000; lastT = t;
+    if (dt > 0.1) dt = 0.1;
+
+    if (charging) { chargeT += dt; power = powerCurve(chargeT); }
+
+    if (phase === "rolling") {
+      acc += dt;
+      while (acc >= FIXED) { stepPhysics(FIXED); acc -= FIXED; if (phase !== "rolling") { acc = 0; break; } }
+    } else acc = 0;
+
+    // maj visuels
+    ballMesh.position.set(ball.x, BALL_R, ball.z);
+    aimGroup.position.set(ball.x, 0, ball.z);
+    aimGroup.rotation.y = -aim;
+    const showAim = (phase === "ready" || charging);
+    aimGroup.visible = showAim;
+    if (charging) {
+      const len = 0.6 + power * 3.2;
+      aimGroup.scale.set(len, 1, 1);
+    } else aimGroup.scale.set(1.4, 1, 1);
+
+    // caméra : suivi doux
+    const d = desiredCam();
+    camera.position.lerp(d.pos, 0.12);
+    camLook.lerp(d.look, 0.12);
+    camera.lookAt(camLook);
+
+    // drapeau qui ondule légèrement
+    cloth.rotation.y = Math.sin(t / 500) * 0.25;
+
+    updatePowerBar();
+    renderer.render(scene, camera);
+  }
+
+  // ---------- Redimensionnement ----------
+  function resize() {
+    const w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  window.addEventListener("resize", resize);
+
+  // ---------- Démarrage ----------
+  btnStart.addEventListener("click", () => {
+    startOverlay.classList.add("hidden");
+    try { if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    resize();
+    nextHole(true);
+  });
+
+  // Init (rendu de fond derrière l'overlay)
+  resize();
+  nextHole(true);
+  phase = "idle";
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
