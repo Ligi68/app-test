@@ -380,6 +380,7 @@
   </div>
 </div>
 
+<script src="./leaderboard.js"></script>
 <script>
 (function () {
   "use strict";
@@ -925,11 +926,12 @@
       if (winner === "A") {
         const acc = Math.round(hitsCount / shots * 100);
         const score = Math.round(TOTAL_CELLS / shots * 1000 * DIFF_MULT[difficulty]);
-        pendingScore = { score, shots, difficulty };
         setStatus("🏆 Victoire ! Flotte ennemie coulée en " + shots + " coups.", "win");
-        scoreLine.textContent = "Score : " + score + "  ·  " + shots + " coups  ·  " + acc + "% de précision";
-        nameInput.value = "";
-        saveBox.classList.remove("hidden");
+        if (window.LB) {
+          setTimeout(function () {
+            LB.promptSubmit("bataille", score, DIFF_LABEL[difficulty] + " · " + shots + " coups · " + acc + "%");
+          }, 500);
+        }
       } else {
         setStatus("☠️ Défaite… ta flotte a été anéantie. Retente ta chance !", "lose");
       }
@@ -1134,7 +1136,7 @@
   });
   btnPlayCpu.addEventListener("click", () => startGame("cpu"));
   btnPlayPvp.addEventListener("click", () => startGame("pvp"));
-  btnOpenLb.addEventListener("click", openLB);
+  btnOpenLb.addEventListener("click", () => { if (window.LB) LB.open("bataille"); else openLB(); });
 
   // pass overlay
   btnPassReady.addEventListener("click", () => {

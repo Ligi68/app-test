@@ -131,6 +131,7 @@
 <div class="controls">
   <button id="btnPause" disabled>Pause</button>
   <button id="btnRestart">Recommencer</button>
+  <button id="btnLb">🏆 Classement</button>
 </div>
 
 <div class="dpad">
@@ -144,6 +145,7 @@
   <kbd>Espace</kbd> ou <kbd>P</kbd> pour mettre en pause · La vitesse augmente à mesure que tu grandis.
 </footer>
 
+<script src="./leaderboard.js"></script>
 <script>
 (function () {
   "use strict";
@@ -271,6 +273,7 @@
     btnStart.textContent = "Rejouer";
     overlay.classList.remove("hidden");
     draw();
+    if (score > 0 && window.LB) setTimeout(function () { LB.promptSubmit("snake", score); }, 500);
   }
 
   // ---- Rendering ----
@@ -385,6 +388,7 @@
   });
   btnPause.addEventListener("click", togglePause);
   btnRestart.addEventListener("click", start);
+  document.getElementById("btnLb").addEventListener("click", () => { if (window.LB) LB.open("snake"); });
 
   document.addEventListener("keydown", (e) => {
     const k = e.key.toLowerCase();
