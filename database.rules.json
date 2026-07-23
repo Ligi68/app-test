@@ -1,0 +1,34 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "profiles": {
+      ".read": true,
+      "$pid": {
+        ".write": true,
+        ".validate": "newData.hasChildren(['name','xp'])",
+        "name":    { ".validate": "newData.isString() && newData.val().length <= 16" },
+        "xp":      { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000000" },
+        "level":   { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 1000" },
+        "emblem":  { ".validate": "newData.isString() && newData.val().length <= 8" },
+        "plays":   { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "wins":    { ".validate": "newData.isNumber() && newData.val() >= 0" },
+        "updated": { ".validate": "newData.isNumber()" },
+        "$other":  { ".validate": false }
+      }
+    },
+    "daily": {
+      ".read": true,
+      "$date": {
+        "$pid": {
+          ".write": true,
+          ".validate": "newData.hasChildren(['xp','plays'])",
+          "name":  { ".validate": "newData.isString() && newData.val().length <= 16" },
+          "xp":    { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "plays": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "$other":{ ".validate": false }
+        }
+      }
+    }
+  }
+}
