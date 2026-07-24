@@ -35,6 +35,13 @@
     position: fixed; top: 10px; left: 12px; z-index: 5;
     color: var(--muted); text-decoration: none; font-size: .85rem; font-weight: 600;
   }
+  .corner-btn {
+    position: fixed; top: 8px; right: 12px; z-index: 5;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--grid-line); border-radius: 10px;
+    padding: 7px 12px; font-size: .95rem; font-weight: 600; cursor: pointer;
+  }
+  .corner-btn:hover { border-color: var(--snake); background: #274b6b; }
   header { text-align: center; margin-bottom: 10px; }
   h1 {
     font-size: clamp(1.6rem, 5vw, 2.4rem); letter-spacing: 2px; text-transform: uppercase;
@@ -82,11 +89,11 @@
   button.primary { background: linear-gradient(135deg, var(--snake), #10b981); color: #04261a; border: none; }
   button.primary:hover { filter: brightness(1.08); }
 
-  .controls { display: flex; gap: 10px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
+  .controls { display: flex; gap: 10px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
 
-  /* On-screen D-pad (mobile) */
+  /* On-screen D-pad (mobile) — collé au plateau */
   .dpad {
-    margin-top: 18px;
+    margin-top: 12px;
     display: grid;
     grid-template-columns: repeat(3, 58px);
     grid-template-rows: repeat(3, 58px);
@@ -107,6 +114,7 @@
 </head>
 <body>
 <a href="index.html" class="home-link">← Accueil</a>
+<button id="btnLb" class="corner-btn" aria-label="Classement">🏆 Classement</button>
 
 <header>
   <h1>Snake</h1>
@@ -128,17 +136,16 @@
   </div>
 </div>
 
-<div class="controls">
-  <button id="btnPause" disabled>Pause</button>
-  <button id="btnRestart">Recommencer</button>
-  <button id="btnLb">🏆 Classement</button>
-</div>
-
 <div class="dpad">
   <button class="up" data-dir="up" aria-label="Haut">▲</button>
   <button class="left" data-dir="left" aria-label="Gauche">◀</button>
   <button class="right" data-dir="right" aria-label="Droite">▶</button>
   <button class="down" data-dir="down" aria-label="Bas">▼</button>
+</div>
+
+<div class="controls">
+  <button id="btnPause" disabled>Pause</button>
+  <button id="btnRestart">Recommencer</button>
 </div>
 
 <footer>
